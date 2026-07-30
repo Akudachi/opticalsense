@@ -18,7 +18,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Battery, Cpu, Plus, RefreshCw, Signal, Trash2, Wifi } from "lucide-react";
+import { Battery, Cpu, Plus, RefreshCw, Signal, Trash2, Wifi, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -37,6 +37,14 @@ function DevicesPage() {
   const refreshMut = useMutation({
     mutationFn: (id: string) => services.devices.refresh(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["devices"] }),
+  });
+  const repairMut = useMutation({
+    mutationFn: (id: string) => services.devices.repair(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["devices"] });
+      toast.success("Device repaired successfully");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Repair failed"),
   });
   const removeMut = useMutation({
     mutationFn: (id: string) => services.devices.unpair(id),
@@ -82,6 +90,11 @@ function DevicesPage() {
                 <Button size="icon" variant="ghost" onClick={() => refreshMut.mutate(d.id)}>
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
+                {!d.online && (
+                  <Button size="icon" variant="ghost" onClick={() => repairMut.mutate(d.id)} title="Repair device">
+                    <Wrench className="h-3.5 w-3.5 text-amber-500" />
+                  </Button>
+                )}
                 <Button size="icon" variant="ghost" onClick={() => removeMut.mutate(d.id)}>
                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
                 </Button>

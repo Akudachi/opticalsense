@@ -437,8 +437,21 @@ function addActivityEvent(kind: ActivityEvent['kind'], message: string, refId?: 
 // Device service with MQTT pairing support
 export const liveDevices: IDeviceService = {
   list: async (): Promise<Device[]> => {
-    // Return devices from local storage
-    return getStoredDevices();
+    // Return devices from local storage with updated online status
+    const devices = getStoredDevices();
+    const now = Date.now();
+    const offlineThreshold = 60000; // 60 seconds - device considered offline if no update in 60s
+    
+    return devices.map(device => {
+      const lastSeenTime = new Date(device.lastSeen).getTime();
+      const isOffline = now - lastSeenTime > offlineThreshold;
+      
+      return {
+        ...device,
+        online: !isOffline,
+        status: isOffline ? 'offline' : 'online',
+      };
+    });
   },
   
   get: async (id: string): Promise<Device | null> => {
@@ -524,8 +537,88 @@ export const liveDevices: IDeviceService = {
   },
   
   refresh: async (id: string): Promise<Device> => {
-    // Should fetch fresh status from backend
-    throw new Error('Device refresh not implemented');
+    // Update device lastSeen to current time and check status
+    const devices = getStoredDevices();
+    const index = devices.findIndex(d => d.id === id);
+    if (index >= 0) {
+      const now = Date.now();
+      const offlineThreshold = 60000; // 60 seconds
+      const lastSeenTime = new Date(devices[index].lastSeen).getTime();
+      const isOffline = now - lastSeenTime > offlineThreshold;
+      
+      devices[index] = {
+        ...devices[index],
+        lastSeen: new Date().toISOString(),
+        online: !isOffline,
+        status: isOffline ? 'offline' : 'online',
+      };
+      storeDevices(devices);
+      return devices[index];
+    }
+    throw new Error('Device not found');
+  },
+  
+  repair: async (id: string): Promise<Device> => {
+    // Re-pair device by subscribing to its status topic
+    return new Promise(async (resolve, reject) => {
+      const devices = getStoredDevices();
+      const device = devices.find(d => d.id === id);
+      if (!device) {
+        reject(new Error('Device not found'));
+        return;
+      }
+      
+      const statusTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/status`;
+      console.log('Repairing device, subscribing to status topic:', statusTopic);
+      
+      try {
+        await mqttClient.connect();
+      } catch (err) {
+        console.error('Failed to connect to MQTT:', err);
+        reject(new Error('Failed to connect to MQTT'));
+        return;
+      }
+      
+      const timeout = setTimeout(() => {
+        console.error('Repair timeout - no status update received');
+        reject(new Error('Repair timeout - no status update received'));
+      }, 15000);
+      
+      const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
+        console.log('Received status message during repair:', message.toString());
+        try {
+          const data = JSON.parse(message.toString());
+          clearTimeout(timeout);
+          unsubscribe();
+          
+          const updatedDevice: Device = {
+            ...device,
+            online: data.status?.toLowerCase().includes('online') || false,
+            status: data.status?.toLowerCase().includes('online') ? 'online' : 'offline',
+            battery: data.battery || device.battery,
+            batteryPct: data.battery || device.batteryPct,
+            lastSeen: new Date().toISOString(),
+            wifi: { 
+              ssid: device.wifi?.ssid || 'Unknown', 
+              rssi: data.wifi || device.wifi?.rssi || -50, 
+              connected: true 
+            },
+            mqtt: data.mqtt || 'connected',
+          };
+          
+          const deviceIndex = devices.findIndex(d => d.id === id);
+          if (deviceIndex >= 0) {
+            devices[deviceIndex] = updatedDevice;
+            storeDevices(devices);
+          }
+          
+          console.log('Device repaired:', updatedDevice);
+          resolve(updatedDevice);
+        } catch (err) {
+          console.error('Error parsing status message:', err);
+        }
+      });
+    });
   },
 };
 

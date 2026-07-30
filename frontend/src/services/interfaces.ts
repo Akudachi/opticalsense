@@ -51,6 +51,7 @@ export interface IDeviceService {
   pair(code: string): Promise<Device>;
   unpair(id: string): Promise<void>;
   refresh(id: string): Promise<Device>;
+  repair(id: string): Promise<Device>;
 }
 
 export interface IClinicService {
