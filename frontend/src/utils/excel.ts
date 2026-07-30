@@ -10,9 +10,26 @@ type Args = {
 
 /** Generates an Excel report with 5-second interval sensor readings and triggers download. */
 export async function generateReportExcel({ test, patient, clinic }: Args): Promise<void> {
-  // Sample data every 5 seconds (assuming 10 Hz sampling rate = 50 samples per 5 seconds)
-  const samplingInterval = 50; // 5 seconds at 10 Hz
-  const sampledData = test.samples.filter((_, index) => index % samplingInterval === 0);
+  // Sample data every 5 seconds based on actual timestamps
+  const samplingIntervalMs = 5000; // 5 seconds in milliseconds
+  const sampledData: typeof test.samples = [];
+  
+  if (test.samples.length > 0) {
+    const startTime = new Date(test.samples[0].timestamp).getTime();
+    let lastSampleTime = startTime;
+    
+    // Always include the first sample
+    sampledData.push(test.samples[0]);
+    
+    // Sample every 5 seconds based on actual timestamps
+    for (let i = 1; i < test.samples.length; i++) {
+      const sampleTime = new Date(test.samples[i].timestamp).getTime();
+      if (sampleTime - lastSampleTime >= samplingIntervalMs) {
+        sampledData.push(test.samples[i]);
+        lastSampleTime = sampleTime;
+      }
+    }
+  }
 
   // Create workbook
   const workbook = XLSX.utils.book_new();
