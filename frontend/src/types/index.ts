@@ -39,29 +39,41 @@ export type Patient = {
 
 export type Device = {
   id: ID;
-  clinicId: ID;
+  clinicId?: ID;
   name: string;
-  deviceId: string; // hardware id
+  deviceId?: string; // hardware id
   firmware: string;
-  online: boolean;
-  wifi: { ssid: string; rssi: number; connected: boolean };
-  mqtt: ConnectionStatus;
-  batteryPct: number;
-  signalStrength: number; // 0-100
+  online?: boolean;
+  status?: "online" | "offline" | "connecting";
+  wifi?: { ssid: string; rssi: number; connected: boolean };
+  mqtt?: ConnectionStatus;
+  batteryPct?: number;
+  battery?: number;
+  signalStrength?: number; // 0-100
   lastSeen: ISODate;
-  pairedAt: ISODate;
+  pairedAt?: ISODate;
 };
 
 export type SensorSample = {
-  t: number; // ms since stream start
-  red: number;
-  ir: number;
-  spo2: number;
-  pulse: number;
+  id?: string;
+  deviceId: string;
+  timestamp: string; // ISO date
+  battery: number;
+  voltage?: number;
   temperature: number;
-  batteryPct: number;
+  heartRate: number;
+  heartRateConfidence?: number;
+  spo2: number;
+  spo2Confidence?: number;
   signalQuality: number; // 0-100
-  confidence: "low" | "medium" | "high";
+  motionDetected?: boolean;
+  sensorSaturated?: boolean;
+  vitalityIndex?: number;
+  vitalityStatus?: string;
+  probeQuality?: string;
+  deviceState?: string;
+  sampleCount?: number;
+  demoMode?: boolean;
 };
 
 export type TestStatus = "in_progress" | "completed" | "aborted";
@@ -118,10 +130,9 @@ export type ActivityEvent = {
 };
 
 export type SystemStatus = {
-  backend: ConnectionStatus;
-  mqtt: ConnectionStatus;
-  database: ConnectionStatus;
-  device: ConnectionStatus;
+  connected: boolean;
+  devicesOnline: number;
+  lastUpdate: string;
 };
 
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
