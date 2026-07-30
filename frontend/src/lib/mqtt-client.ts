@@ -23,7 +23,7 @@ class MQTTClient {
         return;
       }
 
-      const wsUrl = `wss://${env.MQTT.host}:${env.MQTT.port}/mqtt`;
+      const wsUrl = `wss://${env.MQTT.host}:8884/mqtt`;
       console.log('Connecting to MQTT:', wsUrl);
       
       this.client = mqtt.connect(wsUrl, {
