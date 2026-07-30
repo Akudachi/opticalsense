@@ -535,14 +535,20 @@ export const liveStream: ISensorStream = {
     const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
     const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
     
+    console.log('Subscribing to telemetry for device:', deviceId);
+    console.log('Telemetry topic:', telemetryTopic);
+    
     // Connect to MQTT if not already connected
     mqttClient.connect().catch(err => {
       console.error('Failed to connect to MQTT:', err);
     });
 
     const unsubscribeTelemetry = mqttClient.subscribe(telemetryTopic, (topic, message) => {
+      console.log('Received MQTT message on topic:', topic);
+      console.log('Message content:', message.toString());
       try {
         const data = JSON.parse(message.toString());
+        console.log('Parsed telemetry data:', data);
         
         const sample: SensorSample = {
           id: `${deviceId}-${data.timestamp}`,
@@ -561,6 +567,7 @@ export const liveStream: ISensorStream = {
           demoMode: data.demoMode || false,
         };
         
+        console.log('Calling onSample with sample:', sample);
         onSample(sample);
       } catch (err) {
         console.error('Error parsing telemetry message:', err);

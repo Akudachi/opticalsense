@@ -77,7 +77,7 @@ function DashboardPage() {
     }
   }, [patientId, patients, running]);
 
-  const { latest, samples } = useLiveSensors(deviceId, running);
+  const { latest, samples } = useLiveSensors(deviceId, true); // Always subscribe to live data
 
   // Capture samples during a running test
   useEffect(() => {
@@ -151,11 +151,11 @@ function DashboardPage() {
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <SensorCard label="SpO₂" value={latest?.spo2 ?? 0} decimals={1} suffix="%" icon={HeartPulse} tint="brand" samples={displaySamples} metricKey="spo2" hint="Peripheral oxygen saturation" />
-              <SensorCard label="Pulse" value={latest?.pulse ?? 0} suffix=" bpm" icon={Activity} tint="teal" samples={displaySamples} metricKey="pulse" hint="Heart rate" />
+              <SensorCard label="Pulse" value={latest?.heartRate ?? 0} suffix=" bpm" icon={Activity} tint="teal" samples={displaySamples} metricKey="heartRate" hint="Heart rate" />
               <SensorCard label="Temperature" value={latest?.temperature ?? 0} decimals={2} suffix=" °C" icon={Thermometer} tint="amber" samples={displaySamples} metricKey="temperature" hint="Ambient / probe" />
-              <SensorCard label="Red Signal" value={latest?.red ?? 0} icon={Waves} tint="rose" samples={displaySamples} metricKey="red" hint="Raw amplitude" />
-              <SensorCard label="IR Signal" value={latest?.ir ?? 0} icon={Waves} tint="brand" samples={displaySamples} metricKey="ir" hint="Raw amplitude" />
-              <SensorCard label="Battery" value={latest?.batteryPct ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="batteryPct" hint="Device battery" />
+              <SensorCard label="Signal Quality" value={latest?.signalQuality ?? 0} suffix="%" icon={Waves} tint="rose" samples={displaySamples} metricKey="signalQuality" hint="Signal quality" />
+              <SensorCard label="Vitality Index" value={latest?.vitalityIndex ?? 0} decimals={1} icon={Waves} tint="brand" samples={displaySamples} metricKey="vitalityIndex" hint="Vitality index" />
+              <SensorCard label="Battery" value={latest?.battery ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="battery" hint="Device battery" />
             </div>
 
             <LiveWaveform samples={displaySamples} />
@@ -164,7 +164,7 @@ function DashboardPage() {
               <SignalQuality latest={latest} />
               <GlassCard>
                 <div className="text-xs text-muted-foreground">Measurement Confidence</div>
-                <div className="mt-1 font-display text-2xl font-semibold capitalize">{latest?.confidence ?? "—"}</div>
+                <div className="mt-1 font-display text-2xl font-semibold capitalize">{latest?.vitalityStatus ?? "—"}</div>
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   Combines waveform SNR, IR/Red ratio stability, and probe contact quality. High confidence
                   indicates the capture is safe to include in clinical assessment.
