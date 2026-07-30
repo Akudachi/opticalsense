@@ -18,6 +18,28 @@ import type { SensorSample, SystemStatus, Device } from "@/types";
 import { mqttClient } from "@/lib/mqtt-client";
 import { env } from "@/config/env";
 
+// Local storage for devices
+const DEVICES_STORAGE_KEY = 'opticalsense_devices';
+
+function getStoredDevices(): Device[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(DEVICES_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function storeDevices(devices: Device[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(DEVICES_STORAGE_KEY, JSON.stringify(devices));
+  } catch (err) {
+    console.error('Failed to store devices:', err);
+  }
+}
+
 // Mock implementations for services that need backend API
 const NI = (name: string) =>
   () => {
@@ -39,13 +61,13 @@ export const liveActivity: IActivityService = notImpl<IActivityService>("activit
 // Device service with MQTT pairing support
 export const liveDevices: IDeviceService = {
   list: async (): Promise<Device[]> => {
-    // For now, return empty list - should fetch from backend
-    return [];
+    // Return devices from local storage
+    return getStoredDevices();
   },
   
   get: async (id: string): Promise<Device | null> => {
-    // Should fetch from backend
-    return null;
+    const devices = getStoredDevices();
+    return devices.find(d => d.id === id) || null;
   },
   
   pair: async (code: string): Promise<Device> => {
@@ -91,6 +113,17 @@ export const liveDevices: IDeviceService = {
               firmware: data.firmware || 'unknown',
             };
             
+            // Store device in localStorage
+            const devices = getStoredDevices();
+            const existingIndex = devices.findIndex(d => d.id === device.id);
+            if (existingIndex >= 0) {
+              devices[existingIndex] = device;
+            } else {
+              devices.push(device);
+            }
+            storeDevices(devices);
+            
+            console.log('Device stored:', device);
             resolve(device);
           }
         } catch (err) {
@@ -101,8 +134,11 @@ export const liveDevices: IDeviceService = {
   },
   
   unpair: async (id: string): Promise<void> => {
-    // Should call backend API
-    console.log('Unpairing device:', id);
+    // Remove device from localStorage
+    const devices = getStoredDevices();
+    const filtered = devices.filter(d => d.id !== id);
+    storeDevices(filtered);
+    console.log('Device unpaired:', id);
   },
   
   refresh: async (id: string): Promise<Device> => {
