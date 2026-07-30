@@ -18,11 +18,13 @@ class MQTTClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.client?.connected) {
+        console.log('MQTT already connected');
         resolve();
         return;
       }
 
       const wsUrl = `wss://${env.MQTT.host}:${env.MQTT.port}/mqtt`;
+      console.log('Connecting to MQTT:', wsUrl);
       
       this.client = mqtt.connect(wsUrl, {
         username: env.MQTT.username,
@@ -33,7 +35,7 @@ class MQTTClient {
       });
 
       this.client.on('connect', () => {
-        console.log('MQTT Connected');
+        console.log('MQTT Connected successfully');
         this.reconnectAttempts = 0;
         this.notifyConnectionCallbacks(true);
         resolve();
@@ -55,9 +57,12 @@ class MQTTClient {
       });
 
       this.client.on('message', (topic, message) => {
+        console.log('MQTT message received on topic:', topic);
         const callbacks = this.messageCallbacks.get(topic);
         if (callbacks) {
           callbacks.forEach(cb => cb(topic, message));
+        } else {
+          console.log('No callbacks registered for topic:', topic);
         }
       });
     });
@@ -72,11 +77,15 @@ class MQTTClient {
   }
 
   subscribe(topic: string, callback: MessageCallback): () => void {
+    console.log('Subscribing to topic:', topic);
     if (!this.messageCallbacks.has(topic)) {
       this.messageCallbacks.set(topic, new Set());
       
       if (this.client?.connected) {
+        console.log('Client connected, subscribing to:', topic);
         this.client.subscribe(topic);
+      } else {
+        console.log('Client not connected yet, will subscribe when connected');
       }
     }
 

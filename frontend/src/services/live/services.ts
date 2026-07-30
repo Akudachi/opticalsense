@@ -52,14 +52,23 @@ export const liveDevices: IDeviceService = {
     // Subscribe to pairing topic to receive device info
     return new Promise((resolve, reject) => {
       const topic = `${env.MQTT.topicPrefix}/device/+/pair/request`;
+      console.log('Starting pairing with code:', code);
+      console.log('Subscribing to topic:', topic);
+      
       const timeout = setTimeout(() => {
+        console.error('Pairing timeout - no device found with code:', code);
         reject(new Error('Pairing timeout - no device found'));
       }, 30000);
 
       const unsubscribe = mqttClient.subscribe(topic, (topic, message) => {
+        console.log('Received message on topic:', topic);
+        console.log('Message content:', message.toString());
         try {
           const data = JSON.parse(message.toString());
+          console.log('Parsed data:', data);
+          console.log('Looking for code:', code, 'Got code:', data.pairingCode);
           if (data.pairingCode === code) {
+            console.log('Code matched! Resolving device');
             clearTimeout(timeout);
             unsubscribe();
             
