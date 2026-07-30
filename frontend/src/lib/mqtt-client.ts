@@ -77,6 +77,7 @@ class MQTTClient {
 
       this.client.on('message', (topic, message) => {
         console.log('MQTT message received on topic:', topic);
+        console.log('Message content:', message.toString());
         
         // Check all registered patterns to find matches
         let matchedCallbacks = false;
