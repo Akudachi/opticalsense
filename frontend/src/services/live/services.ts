@@ -156,8 +156,8 @@ export const liveDevices: IDeviceService = {
 // Live MQTT streaming service
 export const liveStream: ISensorStream = {
   subscribe: (deviceId: string, onSample: (s: SensorSample) => void): (() => void) => {
-    const telemetryTopic = `${env.MQTT.topicPrefix}/${deviceId}/telemetry`;
-    const statusTopic = `${env.MQTT.topicPrefix}/${deviceId}/status`;
+    const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
+    const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
     
     // Connect to MQTT if not already connected
     mqttClient.connect().catch(err => {
