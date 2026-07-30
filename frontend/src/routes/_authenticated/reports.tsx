@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { getServices } from "@/services";
 import { formatDateTime } from "@/utils/format";
 import { generateReportPdf } from "@/utils/pdf";
+import { generateReportExcel } from "@/utils/excel";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Download } from "lucide-react";
+import { Download, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/reports")({
@@ -29,7 +30,7 @@ function ReportsPage() {
   const nameFor = (id: string) => patients.find((p) => p.id === id)?.fullName ?? "—";
   const testFor = (id: string) => tests.find((t) => t.id === id);
 
-  async function download(reportId: string) {
+  async function downloadPdf(reportId: string) {
     const r = reports.find((x) => x.id === reportId)!;
     const t = testFor(r.testId);
     const p = patients.find((x) => x.id === r.patientId);
@@ -38,6 +39,17 @@ function ReportsPage() {
       return;
     }
     await generateReportPdf({ test: t, patient: p, clinic });
+  }
+
+  async function downloadExcel(reportId: string) {
+    const r = reports.find((x) => x.id === reportId)!;
+    const t = testFor(r.testId);
+    const p = patients.find((x) => x.id === r.patientId);
+    if (!t || !p || !clinic) {
+      toast.error("Missing linked test or patient");
+      return;
+    }
+    await generateReportExcel({ test: t, patient: p, clinic });
   }
 
   return (
@@ -64,8 +76,11 @@ function ReportsPage() {
                 {r.aiAnalysis && <div className="mt-2 text-xs italic text-muted-foreground">{r.aiAnalysis}</div>}
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => download(r.id)} className="bg-brand-gradient text-white hover:opacity-95">
+                <Button size="sm" onClick={() => downloadPdf(r.id)} className="bg-brand-gradient text-white hover:opacity-95">
                   <Download className="mr-1 h-4 w-4" /> PDF
+                </Button>
+                <Button size="sm" onClick={() => downloadExcel(r.id)} variant="outline">
+                  <FileSpreadsheet className="mr-1 h-4 w-4" /> Excel
                 </Button>
               </div>
             </div>
