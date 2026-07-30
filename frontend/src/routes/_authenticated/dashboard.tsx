@@ -137,14 +137,30 @@ function DashboardPage() {
     mutationFn: () =>
       services.tests.stop(activeTestId!, {
         samples: samplesRef.current,
-        observations: "",
       }),
     onSuccess: (test) => {
       setRunning(false);
-      setStartedAt(null);
       setLastCompletedTestId(test.id);
-      toast.success(`Test complete — verdict: ${test.pulpVerdict.replace("_", " ")}`);
+      setActiveTestId(null);
+      setStartedAt(null);
+      setElapsed(0);
+      toast.success("Test stopped");
       qc.invalidateQueries({ queryKey: ["tests"] });
+      
+      // Play beep sound on test completion
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 1000; // 1000 Hz beep
+      oscillator.type = 'sine';
+      gainNode.gain.value = 0.3;
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.3); // 0.3 second beep
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not stop test"),
   });

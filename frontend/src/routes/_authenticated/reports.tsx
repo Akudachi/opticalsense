@@ -30,9 +30,9 @@ function ReportsPage() {
   const nameFor = (id: string) => patients.find((p) => p.id === id)?.fullName ?? "—";
   const testFor = (id: string) => tests.find((t) => t.id === id);
   
-  // Sort reports by generatedAt in ascending order (oldest first)
+  // Sort reports by generatedAt in descending order (newest first)
   const sortedReports = [...reports].sort((a, b) => 
-    new Date(a.generatedAt).getTime() - new Date(b.generatedAt).getTime()
+    new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
   );
 
   async function downloadPdf(reportId: string) {
