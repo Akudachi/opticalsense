@@ -84,7 +84,7 @@ export async function generateReportPdf({ test, patient, clinic }: Args): Promis
   // Waveform sketch
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("Optical waveform (normalized IR)", margin, y);
+  doc.text("Heart rate waveform (normalized)", margin, y);
   y += 8;
   const boxW = pageW - margin * 2;
   const boxH = 80;
@@ -93,18 +93,18 @@ export async function generateReportPdf({ test, patient, clinic }: Args): Promis
   doc.rect(margin, y, boxW, boxH);
   const s = test.samples;
   if (s.length > 1) {
-    const irs = s.map((x) => x.ir);
-    const min = Math.min(...irs);
-    const max = Math.max(...irs);
+    const values = s.map((x) => x.heartRate);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
     const range = max - min || 1;
     doc.setDrawColor(59, 107, 214);
     doc.setLineWidth(0.9);
     const step = boxW / (s.length - 1);
     let px = margin;
-    let py = y + boxH - ((s[0].ir - min) / range) * (boxH - 8) - 4;
+    let py = y + boxH - ((s[0].heartRate - min) / range) * (boxH - 8) - 4;
     for (let i = 1; i < s.length; i++) {
       const nx = margin + i * step;
-      const ny = y + boxH - ((s[i].ir - min) / range) * (boxH - 8) - 4;
+      const ny = y + boxH - ((s[i].heartRate - min) / range) * (boxH - 8) - 4;
       doc.line(px, py, nx, ny);
       px = nx;
       py = ny;
