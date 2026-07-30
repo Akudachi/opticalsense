@@ -45,7 +45,7 @@ export function PatientDialog({ open, onOpenChange, patient, onSubmit }: Props) 
         dateOfBirth: patient?.dateOfBirth ?? "",
         sex: patient?.sex ?? "male",
         phone: patient?.phone ?? "",
-        email: patient?.email ?? "",
+        email: "",
         medicalNotes: patient?.medicalNotes ?? "",
         toothOfInterest: patient?.toothOfInterest ?? "",
       });
@@ -86,14 +86,9 @@ export function PatientDialog({ open, onOpenChange, patient, onSubmit }: Props) 
               </Select>
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Phone" error={form.formState.errors.phone?.message}>
-              <Input {...form.register("phone")} />
-            </Field>
-            <Field label="Email" error={form.formState.errors.email?.message}>
-              <Input type="email" {...form.register("email")} />
-            </Field>
-          </div>
+          <Field label="Phone" error={form.formState.errors.phone?.message}>
+            <Input {...form.register("phone")} />
+          </Field>
           <Field label="Clinical notes" error={form.formState.errors.medicalNotes?.message}>
             <Textarea rows={3} {...form.register("medicalNotes")} />
           </Field>

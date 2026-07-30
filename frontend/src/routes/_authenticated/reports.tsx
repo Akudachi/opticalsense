@@ -29,6 +29,11 @@ function ReportsPage() {
   const { data: clinic } = useQuery({ queryKey: ["clinic"], queryFn: () => services.clinic.get() });
   const nameFor = (id: string) => patients.find((p) => p.id === id)?.fullName ?? "—";
   const testFor = (id: string) => tests.find((t) => t.id === id);
+  
+  // Sort reports by generatedAt in ascending order (oldest first)
+  const sortedReports = [...reports].sort((a, b) => 
+    new Date(a.generatedAt).getTime() - new Date(b.generatedAt).getTime()
+  );
 
   async function downloadPdf(reportId: string) {
     const r = reports.find((x) => x.id === reportId)!;
@@ -65,7 +70,7 @@ function ReportsPage() {
             </div>
           </GlassCard>
         )}
-        {reports.map((r) => (
+        {sortedReports.map((r) => (
           <GlassCard key={r.id} interactive>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>

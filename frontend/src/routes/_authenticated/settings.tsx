@@ -9,13 +9,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { env } from "@/config/env";
 import { getServices } from "@/services";
 import { clinicSchema, type ClinicFormValues } from "@/utils/validators";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Building2, Cpu, Database, Key, Palette, Radio, UserCog } from "lucide-react";
+import { Building2, Cpu, Palette, UserCog } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -33,19 +32,13 @@ function SettingsPage() {
           <Tab value="clinic" icon={<Building2 className="h-4 w-4" />} label="Clinic" />
           <Tab value="account" icon={<UserCog className="h-4 w-4" />} label="Account" />
           <Tab value="theme" icon={<Palette className="h-4 w-4" />} label="Appearance" />
-          <Tab value="mqtt" icon={<Radio className="h-4 w-4" />} label="MQTT" />
-          <Tab value="db" icon={<Database className="h-4 w-4" />} label="Database" />
           <Tab value="device" icon={<Cpu className="h-4 w-4" />} label="Device defaults" />
-          <Tab value="api" icon={<Key className="h-4 w-4" />} label="API keys" />
         </TabsList>
 
         <TabsContent value="clinic"><ClinicSettings /></TabsContent>
         <TabsContent value="account"><AccountSettings /></TabsContent>
         <TabsContent value="theme"><ThemeSettings /></TabsContent>
-        <TabsContent value="mqtt"><MqttSettings /></TabsContent>
-        <TabsContent value="db"><DbSettings /></TabsContent>
         <TabsContent value="device"><DeviceSettings /></TabsContent>
-        <TabsContent value="api"><ApiSettings /></TabsContent>
       </Tabs>
     </AppShell>
   );
@@ -162,32 +155,6 @@ function ThemeSettings() {
   );
 }
 
-function MqttSettings() {
-  return (
-    <GlassCard>
-      <div className="text-sm font-semibold">MQTT (HiveMQ Cloud)</div>
-      <p className="mt-1 text-xs text-muted-foreground">Values read from environment variables. Set them in your .env to enable Live Mode.</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Ro label="Host" v={env.MQTT.host || "— not set —"} />
-        <Ro label="Port" v={String(env.MQTT.port)} />
-        <Ro label="Username" v={env.MQTT.username ? "•".repeat(env.MQTT.username.length) : "— not set —"} />
-        <Ro label="Topic prefix" v={env.MQTT.topicPrefix} />
-      </div>
-    </GlassCard>
-  );
-}
-
-function DbSettings() {
-  return (
-    <GlassCard>
-      <div className="text-sm font-semibold">Database (MongoDB Atlas)</div>
-      <p className="mt-1 text-xs text-muted-foreground">Connection is server-side. Set VITE_MONGODB_URI in your backend .env.</p>
-      <div className="mt-4"><Ro label="Backend API" v={env.API_URL || "— not set —"} /></div>
-      <div className="mt-3"><Ro label="Realtime socket" v={env.SOCKET_URL || "— not set —"} /></div>
-    </GlassCard>
-  );
-}
-
 function DeviceSettings() {
   return (
     <GlassCard>
@@ -209,32 +176,12 @@ function DeviceSettings() {
   );
 }
 
-function ApiSettings() {
-  return (
-    <GlassCard>
-      <div className="text-sm font-semibold">API keys</div>
-      <p className="mt-1 text-xs text-muted-foreground">API keys are managed by your backend. Rotate via the backend admin.</p>
-      <div className="mt-4 rounded-xl border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
-        No client-side API keys are used in Demo Mode. In Live Mode, JWT session tokens are issued by the backend at login.
-      </div>
-    </GlassCard>
-  );
-}
-
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   return (
     <div>
       <Label className="text-xs">{label}</Label>
       <div className="mt-1">{children}</div>
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-function Ro({ label, v }: { label: string; v: string }) {
-  return (
-    <div>
-      <Label className="text-xs">{label}</Label>
-      <Input value={v} readOnly className="mt-1" />
     </div>
   );
 }

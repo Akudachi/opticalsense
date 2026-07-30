@@ -5,7 +5,6 @@ import { LiveWaveform } from "@/components/dashboard/LiveWaveform";
 import { SignalQuality } from "@/components/dashboard/SignalQuality";
 import { DeviceStatusCard } from "@/components/dashboard/DeviceStatusCard";
 import { TestControls } from "@/components/dashboard/TestControls";
-import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
 import { GlassCard } from "@/components/common/GlassCard";
 import { useLiveSensors, useSystemStatus } from "@/hooks/useLiveSensors";
 import { getServices } from "@/services";
@@ -39,11 +38,6 @@ function DashboardPage() {
   const { data: devices = [] } = useQuery({
     queryKey: ["devices"],
     queryFn: () => services.devices.list(),
-  });
-  const { data: activity = [] } = useQuery({
-    queryKey: ["activity"],
-    queryFn: () => services.activity.list(15),
-    refetchInterval: 5000,
   });
 
   const patients = patientsPage?.items ?? [];
@@ -84,6 +78,33 @@ function DashboardPage() {
     if (running && latest) samplesRef.current.push(latest);
   }, [running, latest]);
 
+  // Beep sound for critical conditions
+  useEffect(() => {
+    if (!running || !latest) return;
+    
+    const isCritical = 
+      latest.spo2 < 90 ||
+      latest.heartRate < 60 || latest.heartRate > 100 ||
+      latest.temperature < 36 || latest.temperature > 38 ||
+      latest.signalQuality < 50;
+    
+    if (isCritical) {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800; // 800 Hz beep
+      oscillator.type = 'sine';
+      gainNode.gain.value = 0.3;
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.2); // 0.2 second beep
+    }
+  }, [running, latest]);
+
   // Timer
   useEffect(() => {
     if (!running || !startedAt) return;
@@ -108,7 +129,6 @@ function DashboardPage() {
       setStartedAt(Date.now());
       setElapsed(0);
       toast.success("Test started");
-      qc.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not start test"),
   });
@@ -125,7 +145,6 @@ function DashboardPage() {
       setLastCompletedTestId(test.id);
       toast.success(`Test complete — verdict: ${test.pulpVerdict.replace("_", " ")}`);
       qc.invalidateQueries({ queryKey: ["tests"] });
-      qc.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not stop test"),
   });
@@ -135,7 +154,6 @@ function DashboardPage() {
     onSuccess: () => {
       toast.success("Report generated — view it in the Reports section.");
       qc.invalidateQueries({ queryKey: ["reports"] });
-      qc.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not generate report"),
   });
@@ -144,12 +162,12 @@ function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6">
+      <div className="space-y-4">
         <StatusStrip status={status} />
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-          <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <SensorCard label="SpO₂" value={latest?.spo2 ?? 0} decimals={1} suffix="%" icon={HeartPulse} tint="brand" samples={displaySamples} metricKey="spo2" hint="Peripheral oxygen saturation" />
               <SensorCard label="Pulse" value={latest?.heartRate ?? 0} suffix=" bpm" icon={Activity} tint="teal" samples={displaySamples} metricKey="heartRate" hint="Heart rate" />
               <SensorCard label="Temperature" value={latest?.temperature ?? 0} decimals={2} suffix=" °C" icon={Thermometer} tint="amber" samples={displaySamples} metricKey="temperature" hint="Ambient / probe" />
@@ -160,7 +178,7 @@ function DashboardPage() {
 
             <LiveWaveform samples={displaySamples} />
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               <SignalQuality latest={latest} />
               <GlassCard>
                 <div className="text-xs text-muted-foreground">Measurement Confidence</div>
@@ -177,7 +195,7 @@ function DashboardPage() {
             </div>
           </div>
 
-          <aside className="space-y-4">
+          <aside className="space-y-3">
             <DeviceStatusCard device={activeDevice} />
 
             {activePatient && (
@@ -210,8 +228,6 @@ function DashboardPage() {
               onGenerateReport={() => reportMut.mutate()}
               canGenerate={!!lastCompletedTestId && !running}
             />
-
-            <ActivityFeed events={activity} />
           </aside>
         </div>
       </div>
