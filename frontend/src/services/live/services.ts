@@ -51,7 +51,7 @@ export const liveDevices: IDeviceService = {
   pair: async (code: string): Promise<Device> => {
     // Subscribe to pairing topic to receive device info
     return new Promise((resolve, reject) => {
-      const topic = `${env.MQTT.topicPrefix}/+/pair/request`;
+      const topic = `${env.MQTT.topicPrefix}/device/+/pair/request`;
       const timeout = setTimeout(() => {
         reject(new Error('Pairing timeout - no device found'));
       }, 30000);
