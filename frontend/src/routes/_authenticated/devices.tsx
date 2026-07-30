@@ -71,10 +71,10 @@ function DevicesPage() {
               </Badge>
             </div>
             <div className="mt-4 grid grid-cols-4 gap-2 text-center">
-              <Stat icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={d.wifi.connected ? `${d.wifi.rssi} dBm` : "—"} />
-              <Stat icon={<Signal className="h-3.5 w-3.5" />} label="Signal" value={`${d.signalStrength}%`} />
-              <Stat icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${d.batteryPct}%`} />
-              <Stat icon={<Cpu className="h-3.5 w-3.5" />} label="MQTT" value={d.mqtt} />
+              <Stat icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={d.wifi?.connected ? `${d.wifi.rssi} dBm` : "—"} />
+              <Stat icon={<Signal className="h-3.5 w-3.5" />} label="Signal" value={`${d.signalStrength ?? 0}%`} />
+              <Stat icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${d.batteryPct ?? 0}%`} />
+              <Stat icon={<Cpu className="h-3.5 w-3.5" />} label="MQTT" value={d.mqtt ?? "unknown"} />
             </div>
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span>Last seen {formatDistanceToNowStrict(new Date(d.lastSeen), { addSuffix: true })}</span>
