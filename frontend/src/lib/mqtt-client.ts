@@ -15,6 +15,25 @@ class MQTTClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
 
+  // Pattern matching for MQTT wildcards
+  private topicMatches(pattern: string, topic: string): boolean {
+    const patternParts = pattern.split('/');
+    const topicParts = topic.split('/');
+    
+    if (patternParts.length !== topicParts.length) return false;
+    
+    for (let i = 0; i < patternParts.length; i++) {
+      const patternPart = patternParts[i];
+      const topicPart = topicParts[i];
+      
+      if (patternPart === '+') continue; // Single level wildcard
+      if (patternPart === '#') return true; // Multi level wildcard (not used here)
+      if (patternPart !== topicPart) return false;
+    }
+    
+    return true;
+  }
+
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.client?.connected) {
@@ -58,10 +77,18 @@ class MQTTClient {
 
       this.client.on('message', (topic, message) => {
         console.log('MQTT message received on topic:', topic);
-        const callbacks = this.messageCallbacks.get(topic);
-        if (callbacks) {
-          callbacks.forEach(cb => cb(topic, message));
-        } else {
+        
+        // Check all registered patterns to find matches
+        let matchedCallbacks = false;
+        for (const [pattern, callbacks] of this.messageCallbacks.entries()) {
+          if (this.topicMatches(pattern, topic)) {
+            console.log(`Pattern ${pattern} matches topic ${topic}`);
+            callbacks.forEach(cb => cb(topic, message));
+            matchedCallbacks = true;
+          }
+        }
+        
+        if (!matchedCallbacks) {
           console.log('No callbacks registered for topic:', topic);
         }
       });
