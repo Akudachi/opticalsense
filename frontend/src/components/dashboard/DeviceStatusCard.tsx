@@ -32,9 +32,9 @@ export function DeviceStatusCard({ device }: { device: Device | undefined }) {
         </Badge>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-        <Metric icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={`${device.wifi.rssi} dBm`} />
-        <Metric icon={<Radio className="h-3.5 w-3.5" />} label="MQTT" value={device.mqtt} />
-        <Metric icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${device.batteryPct}%`} />
+        <Metric icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={device.wifi?.connected ? `${device.wifi.rssi} dBm` : "—"} />
+        <Metric icon={<Radio className="h-3.5 w-3.5" />} label="MQTT" value={device.mqtt ?? "unknown"} />
+        <Metric icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${device.batteryPct ?? 0}%`} />
       </div>
       <div className="mt-3 text-[11px] text-muted-foreground">
         Last seen {formatDistanceToNowStrict(new Date(device.lastSeen), { addSuffix: true })}
