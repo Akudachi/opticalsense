@@ -8,7 +8,7 @@ type Args = {
   clinic: Clinic;
 };
 
-/** Generates an Excel report with 5-second interval sampling and triggers download. */
+/** Generates an Excel report with 5-second interval sensor readings and triggers download. */
 export async function generateReportExcel({ test, patient, clinic }: Args): Promise<void> {
   // Sample data every 5 seconds (assuming 10 Hz sampling rate = 50 samples per 5 seconds)
   const samplingInterval = 50; // 5 seconds at 10 Hz
@@ -17,49 +17,17 @@ export async function generateReportExcel({ test, patient, clinic }: Args): Prom
   // Create workbook
   const workbook = XLSX.utils.book_new();
 
-  // Summary sheet
-  const summaryData = [
-    ["OpticalSense - Optical Pulp Vitality Report"],
+  // Sensor data sheet with 5-second interval sampling
+  const sensorData = [
+    ["OpticalSense - Sensor Data Report"],
     [""],
-    ["Clinic Information"],
-    ["Clinic Name", clinic.name],
-    ["Doctor", clinic.doctorName],
-    ["Address", clinic.address],
-    ["Phone", clinic.phone],
-    ["Email", clinic.email],
-    [""],
-    ["Patient Information"],
-    ["Name", patient.fullName],
-    ["Date of Birth", patient.dateOfBirth],
-    ["Phone", patient.phone],
-    ["Email", patient.email || ""],
-    ["Tooth of Interest", test.toothOfInterest || patient.toothOfInterest || ""],
-    [""],
-    ["Test Information"],
     ["Test ID", test.id],
+    ["Patient Name", patient.fullName],
     ["Device ID", test.deviceId],
-    ["Started", formatDateTime(test.startedAt)],
-    ["Ended", test.endedAt ? formatDateTime(test.endedAt) : ""],
+    ["Test Started", formatDateTime(test.startedAt)],
+    ["Test Ended", test.endedAt ? formatDateTime(test.endedAt) : ""],
     ["Duration (seconds)", test.summary.durationSec],
-    ["Status", test.status],
     [""],
-    ["Test Summary"],
-    ["Average SpO₂ (%)", test.summary.avgSpO2],
-    ["Average Pulse (bpm)", test.summary.avgPulse],
-    ["Average Temperature (°C)", test.summary.avgTemp],
-    ["Minimum SpO₂ (%)", test.summary.minSpO2],
-    ["Maximum Pulse (bpm)", test.summary.maxPulse],
-    ["Signal Quality", test.summary.signalQuality],
-    ["Confidence", test.summary.confidence],
-    ["Pulp Verdict", test.pulpVerdict],
-    ["Observations", test.observations || ""],
-  ];
-
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
-
-  // Detailed data sheet with 5-second interval sampling
-  const detailedData = [
     [
       "Timestamp",
       "Heart Rate (bpm)",
@@ -75,7 +43,7 @@ export async function generateReportExcel({ test, patient, clinic }: Args): Prom
   ];
 
   sampledData.forEach((sample) => {
-    detailedData.push([
+    sensorData.push([
       sample.timestamp,
       String(sample.heartRate),
       String(sample.spo2),
@@ -89,9 +57,9 @@ export async function generateReportExcel({ test, patient, clinic }: Args): Prom
     ]);
   });
 
-  const detailedSheet = XLSX.utils.aoa_to_sheet(detailedData);
-  XLSX.utils.book_append_sheet(workbook, detailedSheet, "Sensor Data (5s interval)");
+  const sensorSheet = XLSX.utils.aoa_to_sheet(sensorData);
+  XLSX.utils.book_append_sheet(workbook, sensorSheet, "Sensor Data");
 
   // Generate and download
-  XLSX.writeFile(workbook, `OpticalSense-Report-${test.id.slice(-8).toUpperCase()}.xlsx`);
+  XLSX.writeFile(workbook, `OpticalSense-SensorData-${test.id.slice(-8).toUpperCase()}.xlsx`);
 }
