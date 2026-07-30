@@ -41,15 +41,15 @@ export type Device = {
   id: ID;
   clinicId?: ID;
   name: string;
-  deviceId: string; // hardware id
+  deviceId?: string; // hardware id
   firmware: string;
-  online: boolean;
+  online?: boolean;
   status?: "online" | "offline" | "connecting";
-  wifi: { ssid: string; rssi: number; connected: boolean };
-  mqtt: ConnectionStatus;
-  batteryPct: number;
+  wifi?: { ssid: string; rssi: number; connected: boolean };
+  mqtt?: ConnectionStatus;
+  batteryPct?: number;
   battery?: number;
-  signalStrength: number; // 0-100
+  signalStrength?: number; // 0-100
   lastSeen: ISODate;
   pairedAt?: ISODate;
 };
