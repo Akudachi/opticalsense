@@ -39,18 +39,34 @@ export function getServices(): Services {
       mode: "demo",
     };
   } else {
-    assertLiveConfig();
-    cached = {
-      auth: liveAuth,
-      patients: livePatients,
-      tests: liveTests,
-      reports: liveReports,
-      devices: liveDevices,
-      clinic: liveClinic,
-      activity: liveActivity,
-      stream: liveStream,
-      mode: "live",
-    };
+    // Try live mode, fall back to mock if config is missing
+    try {
+      assertLiveConfig();
+      cached = {
+        auth: liveAuth,
+        patients: livePatients,
+        tests: liveTests,
+        reports: liveReports,
+        devices: liveDevices,
+        clinic: liveClinic,
+        activity: liveActivity,
+        stream: liveStream,
+        mode: "live",
+      };
+    } catch (err) {
+      console.warn("Live config missing, falling back to demo mode:", err);
+      cached = {
+        auth: mockAuth,
+        patients: mockPatients,
+        tests: mockTests,
+        reports: mockReports,
+        devices: mockDevices,
+        clinic: mockClinic,
+        activity: mockActivity,
+        stream: mockStream,
+        mode: "demo",
+      };
+    }
   }
   return cached;
 }
