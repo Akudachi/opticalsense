@@ -107,10 +107,16 @@ export const liveDevices: IDeviceService = {
             const device: Device = {
               id: data.deviceId,
               name: data.name || data.deviceId,
+              deviceId: data.deviceId,
               status: 'online',
+              online: true,
               battery: data.battery || 100,
+              batteryPct: data.battery || 100,
+              signalStrength: 85,
               lastSeen: new Date().toISOString(),
               firmware: data.firmware || 'unknown',
+              wifi: { ssid: 'Unknown', rssi: -50, connected: true },
+              mqtt: 'connected',
             };
             
             // Store device in localStorage
