@@ -50,10 +50,20 @@ export const liveDevices: IDeviceService = {
   
   pair: async (code: string): Promise<Device> => {
     // Subscribe to pairing topic to receive device info
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const topic = `${env.MQTT.topicPrefix}/device/+/pair/request`;
       console.log('Starting pairing with code:', code);
       console.log('Subscribing to topic:', topic);
+      
+      // Ensure MQTT is connected before subscribing
+      try {
+        await mqttClient.connect();
+        console.log('MQTT connected, now subscribing to pairing topic');
+      } catch (err) {
+        console.error('Failed to connect to MQTT:', err);
+        reject(new Error('Failed to connect to MQTT'));
+        return;
+      }
       
       const timeout = setTimeout(() => {
         console.error('Pairing timeout - no device found with code:', code);
