@@ -34,7 +34,7 @@ const raw = (import.meta as unknown as { env: Record<string, string | undefined>
 
 export const env: Env = {
   APP_NAME: raw.VITE_APP_NAME ?? "OpticalSense",
-  USE_MOCK: readBool(raw.VITE_USE_MOCK, true),
+  USE_MOCK: readBool(raw.VITE_USE_MOCK, false), // Changed to false to use real MQTT
   API_URL: raw.VITE_API_URL ?? "",
   SOCKET_URL: raw.VITE_SOCKET_URL ?? "",
   MQTT: {
