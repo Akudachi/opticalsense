@@ -71,7 +71,7 @@ function DashboardPage() {
     }
   }, [patientId, patients, running]);
 
-  const { latest, samples } = useLiveSensors(deviceId, running); // Only subscribe when test is running
+  const { latest, samples } = useLiveSensors(deviceId, true); // Always subscribe to show live sensor data
 
   // Capture samples during a running test
   useEffect(() => {
