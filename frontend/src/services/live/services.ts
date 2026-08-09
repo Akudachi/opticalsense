@@ -489,9 +489,25 @@ export const liveDevices: IDeviceService = {
           console.log('Parsed data:', data);
           console.log('Looking for code:', code, 'Got code:', data.pairingCode);
           if (data.pairingCode === code) {
-            console.log('Code matched! Resolving device');
+            console.log('Code matched! Sending pairing response');
             clearTimeout(timeout);
             unsubscribe();
+            
+            // Send pairing response to device
+            const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
+            const responseData = {
+              status: 'SUCCESS',
+              deviceId: data.deviceId,
+              clinicId: 'demo-clinic-id',
+              clinicName: 'Demo Clinic',
+              deviceName: data.name || data.deviceId,
+              timestamp: new Date().toISOString()
+            };
+            
+            console.log('Publishing pairing response to:', responseTopic);
+            console.log('Response data:', responseData);
+            
+            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
             
             const device: Device = {
               id: data.deviceId,
