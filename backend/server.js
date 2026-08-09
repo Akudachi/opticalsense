@@ -52,6 +52,7 @@ mqttClient.on('message', (topic, message) => {
     if (topic.includes('pair/request')) {
       console.log('Received pairing request from device:', data.deviceId);
       console.log('Pairing code:', data.pairingCode);
+      console.log('Full topic:', topic);
       
       // Publish pairing response back to the specific device
       const responseTopic = `${topicPrefix}/device/${data.deviceId}/pair/response`;
@@ -63,6 +64,9 @@ mqttClient.on('message', (topic, message) => {
         deviceName: data.name || data.deviceId,
         timestamp: new Date().toISOString()
       };
+      
+      console.log('Response topic:', responseTopic);
+      console.log('Response data:', JSON.stringify(responseData));
       
       mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
       console.log('Published pairing response to:', responseTopic);
