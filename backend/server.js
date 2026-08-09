@@ -48,6 +48,26 @@ mqttClient.on('message', (topic, message) => {
     const data = JSON.parse(message.toString());
     console.log(`MQTT Message [${topic}]:`, data);
     
+    // Handle pairing requests
+    if (topic.includes('pair/request')) {
+      console.log('Received pairing request from device:', data.deviceId);
+      console.log('Pairing code:', data.pairingCode);
+      
+      // Publish pairing response back to the specific device
+      const responseTopic = `${topicPrefix}/device/${data.deviceId}/pair/response`;
+      const responseData = {
+        status: 'SUCCESS',
+        deviceId: data.deviceId,
+        clinicId: 'demo-clinic-id',
+        clinicName: 'Demo Clinic',
+        deviceName: data.name || data.deviceId,
+        timestamp: new Date().toISOString()
+      };
+      
+      mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
+      console.log('Published pairing response to:', responseTopic);
+    }
+    
     // Bridge MQTT messages to Socket.IO
     if (topic.includes('telemetry')) {
       io.to(`test-${data.testId}`).emit('telemetry', data);
