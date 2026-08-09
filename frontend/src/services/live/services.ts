@@ -644,8 +644,11 @@ export const liveStream: ISensorStream = {
     const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
     const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
     
-    console.log('Subscribing to telemetry for device:', deviceId);
+    console.log('=== MQTT SUBSCRIPTION START ===');
+    console.log('Device ID:', deviceId);
     console.log('Telemetry topic:', telemetryTopic);
+    console.log('MQTT Config:', env.MQTT);
+    console.log('USE_MOCK:', env.USE_MOCK);
     
     // Connect to MQTT if not already connected
     mqttClient.connect().catch(err => {
@@ -653,7 +656,9 @@ export const liveStream: ISensorStream = {
     });
 
     const unsubscribeTelemetry = mqttClient.subscribe(telemetryTopic, (topic, message) => {
-      console.log('Received MQTT message on topic:', topic);
+      console.log('=== MQTT MESSAGE RECEIVED ===');
+      console.log('Topic:', topic);
+      console.log('Expected topic:', telemetryTopic);
       console.log('Message content:', message.toString());
       try {
         const data = JSON.parse(message.toString());
@@ -678,6 +683,7 @@ export const liveStream: ISensorStream = {
         
         console.log('Calling onSample with sample:', sample);
         onSample(sample);
+        console.log('=== MQTT MESSAGE PROCESSED ===');
       } catch (err) {
         console.error('Error parsing telemetry message:', err);
       }
