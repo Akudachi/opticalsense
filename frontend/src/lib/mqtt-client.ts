@@ -57,6 +57,13 @@ class MQTTClient {
         console.log('MQTT Connected successfully');
         this.reconnectAttempts = 0;
         this.notifyConnectionCallbacks(true);
+        
+        // Subscribe to all pending topics that were registered before connection
+        for (const topic of this.messageCallbacks.keys()) {
+          console.log('Subscribing pending topic on connect:', topic);
+          this.client!.subscribe(topic);
+        }
+        
         resolve();
       });
 
