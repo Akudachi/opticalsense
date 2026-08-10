@@ -665,19 +665,24 @@ export const liveStream: ISensorStream = {
         console.log('Parsed telemetry data:', data);
         
         const sample: SensorSample = {
-          id: `${deviceId}-${data.timestamp}`,
+          id: `${deviceId}-${Date.now()}`,
           deviceId: data.deviceId,
-          timestamp: new Date(data.timestamp).toISOString(),
-          heartRate: data.heartRate,
-          spo2: data.spo2,
-          temperature: data.temperature,
-          battery: data.battery,
+          timestamp: new Date().toISOString(), // Use receive time; ESP sends millis() not epoch
+          heartRate: data.heartRate ?? 0,
+          spo2: data.spo2 ?? 0,
+          temperature: data.temperature ?? 0,
+          battery: data.battery ?? 0,
           voltage: data.voltage,
-          signalQuality: data.signalQuality,
-          vitalityIndex: data.vitalityIndex,
+          signalQuality: data.signalQuality ?? 0,
+          heartRateConfidence: data.heartRateConfidence,
+          spo2Confidence: data.spo2Confidence,
+          motionDetected: data.motionDetected,
+          sensorSaturated: data.sensorSaturated,
+          vitalityIndex: data.vitalityIndex ?? 0,
           vitalityStatus: data.vitalityStatus,
           probeQuality: data.probeQuality,
           deviceState: data.deviceState,
+          sampleCount: data.sampleCount,
           demoMode: data.demoMode || false,
         };
         
@@ -693,6 +698,27 @@ export const liveStream: ISensorStream = {
       try {
         const data = JSON.parse(message.toString());
         console.log('Device status update:', data);
+        
+        // Update stored device with fresh data
+        const devices = getStoredDevices();
+        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
+        if (idx >= 0) {
+          devices[idx] = {
+            ...devices[idx],
+            online: true,
+            status: 'online',
+            lastSeen: new Date().toISOString(),
+            battery: data.battery ?? devices[idx].battery,
+            batteryPct: data.battery ?? devices[idx].batteryPct,
+            wifi: {
+              ssid: devices[idx].wifi?.ssid || 'Connected',
+              rssi: data.wifi ?? devices[idx].wifi?.rssi ?? -50,
+              connected: true,
+            },
+            mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
+          };
+          storeDevices(devices);
+        }
       } catch (err) {
         console.error('Error parsing status message:', err);
       }
