@@ -489,9 +489,25 @@ export const liveDevices: IDeviceService = {
           console.log('Parsed data:', data);
           console.log('Looking for code:', code, 'Got code:', data.pairingCode);
           if (data.pairingCode === code) {
-            console.log('Code matched! Resolving device');
+            console.log('Code matched! Sending pairing response');
             clearTimeout(timeout);
             unsubscribe();
+            
+            // Send pairing response to device
+            const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
+            const responseData = {
+              status: 'SUCCESS',
+              deviceId: data.deviceId,
+              clinicId: 'demo-clinic-id',
+              clinicName: 'Demo Clinic',
+              deviceName: data.name || data.deviceId,
+              timestamp: new Date().toISOString()
+            };
+            
+            console.log('Publishing pairing response to:', responseTopic);
+            console.log('Response data:', responseData);
+            
+            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
             
             const device: Device = {
               id: data.deviceId,
@@ -628,8 +644,11 @@ export const liveStream: ISensorStream = {
     const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
     const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
     
-    console.log('Subscribing to telemetry for device:', deviceId);
+    console.log('=== MQTT SUBSCRIPTION START ===');
+    console.log('Device ID:', deviceId);
     console.log('Telemetry topic:', telemetryTopic);
+    console.log('MQTT Config:', env.MQTT);
+    console.log('USE_MOCK:', env.USE_MOCK);
     
     // Connect to MQTT if not already connected
     mqttClient.connect().catch(err => {
@@ -637,31 +656,51 @@ export const liveStream: ISensorStream = {
     });
 
     const unsubscribeTelemetry = mqttClient.subscribe(telemetryTopic, (topic, message) => {
-      console.log('Received MQTT message on topic:', topic);
+      console.log('=== MQTT MESSAGE RECEIVED ===');
+      console.log('Topic:', topic);
+      console.log('Expected topic:', telemetryTopic);
       console.log('Message content:', message.toString());
       try {
         const data = JSON.parse(message.toString());
         console.log('Parsed telemetry data:', data);
         
         const sample: SensorSample = {
-          id: `${deviceId}-${data.timestamp}`,
+          id: `${deviceId}-${Date.now()}`,
           deviceId: data.deviceId,
-          timestamp: new Date(data.timestamp).toISOString(),
-          heartRate: data.heartRate,
-          spo2: data.spo2,
-          temperature: data.temperature,
-          battery: data.battery,
+          timestamp: new Date().toISOString(), // Use receive time; ESP sends millis() not epoch
+          heartRate: data.heartRate ?? 0,
+          spo2: data.spo2 ?? 0,
+          temperature: data.temperature ?? 0,
+          battery: data.battery ?? 0,
           voltage: data.voltage,
-          signalQuality: data.signalQuality,
-          vitalityIndex: data.vitalityIndex,
+          signalQuality: data.signalQuality ?? 0,
+          heartRateConfidence: data.heartRateConfidence,
+          spo2Confidence: data.spo2Confidence,
+          motionDetected: data.motionDetected,
+          sensorSaturated: data.sensorSaturated,
+          vitalityIndex: data.vitalityIndex ?? 0,
           vitalityStatus: data.vitalityStatus,
           probeQuality: data.probeQuality,
           deviceState: data.deviceState,
+          sampleCount: data.sampleCount,
           demoMode: data.demoMode || false,
+          // GY-MAX3010x specific fields
+          redRaw: data.redRaw,
+          irRaw: data.irRaw,
+          fingerDetected: data.fingerDetected,
+          stableSampleCount: data.stableSampleCount,
+          redFiltered: data.redFiltered,
+          irFiltered: data.irFiltered,
+          redAC: data.redAC,
+          redDC: data.redDC,
+          irAC: data.irAC,
+          irDC: data.irDC,
+          testDuration: data.testDuration,
         };
         
         console.log('Calling onSample with sample:', sample);
         onSample(sample);
+        console.log('=== MQTT MESSAGE PROCESSED ===');
       } catch (err) {
         console.error('Error parsing telemetry message:', err);
       }
@@ -671,6 +710,27 @@ export const liveStream: ISensorStream = {
       try {
         const data = JSON.parse(message.toString());
         console.log('Device status update:', data);
+        
+        // Update stored device with fresh data
+        const devices = getStoredDevices();
+        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
+        if (idx >= 0) {
+          devices[idx] = {
+            ...devices[idx],
+            online: true,
+            status: 'online',
+            lastSeen: new Date().toISOString(),
+            battery: data.battery ?? devices[idx].battery,
+            batteryPct: data.battery ?? devices[idx].batteryPct,
+            wifi: {
+              ssid: devices[idx].wifi?.ssid || 'Connected',
+              rssi: data.wifi ?? devices[idx].wifi?.rssi ?? -50,
+              connected: true,
+            },
+            mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
+          };
+          storeDevices(devices);
+        }
       } catch (err) {
         console.error('Error parsing status message:', err);
       }

@@ -57,6 +57,13 @@ class MQTTClient {
         console.log('MQTT Connected successfully');
         this.reconnectAttempts = 0;
         this.notifyConnectionCallbacks(true);
+        
+        // Subscribe to all pending topics that were registered before connection
+        for (const topic of this.messageCallbacks.keys()) {
+          console.log('Subscribing pending topic on connect:', topic);
+          this.client!.subscribe(topic);
+        }
+        
         resolve();
       });
 
@@ -132,6 +139,17 @@ class MQTTClient {
         }
       }
     };
+  }
+
+  publish(topic: string, message: string, options?: { retain?: boolean; qos?: number }): void {
+    if (!this.client?.connected) {
+      console.error('Cannot publish - MQTT client not connected');
+      return;
+    }
+    
+    console.log('Publishing to topic:', topic);
+    console.log('Message:', message);
+    this.client.publish(topic, message, options);
   }
 
   onConnectionChange(callback: ConnectionCallback): () => void {

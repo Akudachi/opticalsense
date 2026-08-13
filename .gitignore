@@ -14,7 +14,7 @@ dist-ssr
 .vinxi
 .tanstack/**
 .nitro
-*.local
+# *.local
 
 # Environment files (never commit secrets)
 .env

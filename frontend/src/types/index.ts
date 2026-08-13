@@ -74,6 +74,18 @@ export type SensorSample = {
   deviceState?: string;
   sampleCount?: number;
   demoMode?: boolean;
+  // GY-MAX3010x specific fields
+  redRaw?: number; // Raw RED value from GY-MAX3010x
+  irRaw?: number; // Raw IR value from GY-MAX3010x
+  fingerDetected?: boolean; // Finger detection status
+  stableSampleCount?: number; // Number of stable samples collected
+  redFiltered?: number; // Filtered RED signal
+  irFiltered?: number; // Filtered IR signal
+  redAC?: number; // RED AC component for SpO2 calculation
+  redDC?: number; // RED DC component for SpO2 calculation
+  irAC?: number; // IR AC component for SpO2 calculation
+  irDC?: number; // IR DC component for SpO2 calculation
+  testDuration?: number; // Test duration in milliseconds
 };
 
 export type TestStatus = "in_progress" | "completed" | "aborted";

@@ -68,6 +68,9 @@ export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tin
       ? samples.slice(-40).map((s, i) => ({ i, v: Number(s[metricKey]) }))
       : [];
   
+  // Get latest sample for additional info
+  const latestSample = samples?.[samples.length - 1];
+  
   return (
     <GlassCard interactive>
       <div className="flex items-start justify-between">
@@ -77,6 +80,13 @@ export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tin
             <CountUp value={value} decimals={decimals} suffix={suffix} className={statusColors.fg} />
           </div>
           {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+          {/* Show finger detection status for relevant sensors */}
+          {latestSample?.fingerDetected !== undefined && metricKey && (
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              {latestSample.fingerDetected ? "Finger: YES" : "Finger: NO"}
+              {latestSample.stableSampleCount !== undefined && ` (${latestSample.stableSampleCount} samples)`}
+            </div>
+          )}
         </div>
         <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl", statusColors.bg)}>
           <Icon className={cn("h-4 w-4", statusColors.fg)} />

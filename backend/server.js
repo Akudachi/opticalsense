@@ -48,9 +48,57 @@ mqttClient.on('message', (topic, message) => {
     const data = JSON.parse(message.toString());
     console.log(`MQTT Message [${topic}]:`, data);
     
+    // Handle pairing requests
+    if (topic.includes('pair/request')) {
+      console.log('Received pairing request from device:', data.deviceId);
+      console.log('Pairing code:', data.pairingCode);
+      console.log('Full topic:', topic);
+      
+      // Publish pairing response back to the specific device
+      const responseTopic = `${topicPrefix}/device/${data.deviceId}/pair/response`;
+      const responseData = {
+        status: 'SUCCESS',
+        deviceId: data.deviceId,
+        clinicId: 'demo-clinic-id',
+        clinicName: 'Demo Clinic',
+        deviceName: data.name || data.deviceId,
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('Response topic:', responseTopic);
+      console.log('Response data:', JSON.stringify(responseData));
+      
+      mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
+      console.log('Published pairing response to:', responseTopic);
+    }
+    
     // Bridge MQTT messages to Socket.IO
     if (topic.includes('telemetry')) {
-      io.to(`test-${data.testId}`).emit('telemetry', data);
+      // Normalize GY-MAX3010x data format for frontend compatibility
+      const normalizedData = {
+        ...data,
+        // Ensure GY-MAX3010x specific fields are properly handled
+        redRaw: data.redRaw || 0,
+        irRaw: data.irRaw || 0,
+        fingerDetected: data.fingerDetected || false,
+        stableSampleCount: data.stableSampleCount || 0,
+        redFiltered: data.redFiltered || 0,
+        irFiltered: data.irFiltered || 0,
+        redAC: data.redAC || 0,
+        redDC: data.redDC || 0,
+        irAC: data.irAC || 0,
+        irDC: data.irDC || 0,
+        testDuration: data.testDuration || 0,
+        // Legacy field compatibility
+        probeOnTooth: data.fingerDetected || false, // Map fingerDetected to probeOnTooth for compatibility
+        ambient: data.ambient || 0, // Keep for backward compatibility
+      };
+      
+      // Emit to both test-specific room and device-specific room
+      io.to(`test-${data.testId}`).emit('telemetry', normalizedData);
+      io.to(`device-${data.deviceId}`).emit('telemetry', normalizedData);
+      
+      console.log('Bridged telemetry to Socket.IO for device:', data.deviceId);
     }
   } catch (err) {
     console.error('Error parsing MQTT message:', err);
