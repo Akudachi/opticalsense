@@ -674,13 +674,11 @@ void initializeMAX30100() {
     return;
   }
   
-  // Configure the sensor
+  // Configure the sensor using MAX30100_milan library API
   pulseOximeter.setMode(MAX30100_MODE_SPO2_HR);
-  pulseOximeter.setADCRange(MAX30100_ADCRANGE_4096);
-  pulseOximeter.setSampleRate(MAX30100_SAMPLERATE_100HZ);
-  pulseOximeter.setPulseWidth(MAX30100_SPC_PW_160US);
-  pulseOximeter.setIRLedCurrent(MAX30100_IRCURR_50MA);
-  pulseOximeter.setRedLedCurrent(MAX30100_REDCURR_27MA);
+  pulseOximeter.setSamplingRate(MAX30100_SAMPRATE_100HZ);
+  pulseOximeter.setLedsPulseWidth(MAX30100_SPC_PW_1600US_16BITS);
+  pulseOximeter.setLedsCurrent(MAX30100_LED_CURR_50MA, MAX30100_LED_CURR_37MA);
   
   Serial.println(F("GY-MAX3010x Initialized Successfully"));
   Serial.print(F("I2C Address: 0x"));
@@ -1597,9 +1595,9 @@ void updateMAX30100() {
   // Update the sensor - this reads new data
   pulseOximeter.update();
   
-  // Get the raw values
-  redRaw = pulseOximeter.getRawRed();
-  irRaw = pulseOximeter.getRawIR();
+  // Get the raw values using MAX30100_milan library API
+  redRaw = pulseOximeter.red;
+  irRaw = pulseOximeter.IR;
 }
 
 // ============================================================
@@ -1883,27 +1881,19 @@ void calculateSpO2() {
   // ---- smooth R ----
   if (firstRun) { 
     smoothR = R; 
-    // Use proper calibrated curve from MAX30100 library
-    // The library uses a calibrated lookup table for accurate SpO2
+    // Use empirical formula for SpO2 calculation
+    // Note: This is a simplified formula. For clinical use, proper calibration is required.
     smoothSpo2 = 110.0f - 25.0f * R; // Initial estimate
     firstRun = false; 
   }
   smoothR = smoothR * 0.80f + R * 0.20f;
 
-  // ---- Use library's SpO2 calculation if available ----
-  // The MAX30100 library has built-in SpO2 calculation using calibrated curves
-  float librarySpO2 = pulseOximeter.getSpO2();
-  
-  // If library provides valid SpO2, use it; otherwise use R-ratio method
-  if (librarySpO2 > 0 && librarySpO2 <= 100) {
-    smoothSpo2 = smoothSpo2 * 0.7f + librarySpO2 * 0.3f;
-  } else {
-    // Fallback to empirical formula (better than fake 110-25*R)
-    // Using more accurate empirical curve based on medical research
-    float raw = 110.0f - 25.0f * smoothR;
-    raw = constrain(raw, 70.0f, 100.0f);
-    smoothSpo2 = smoothSpo2 * 0.85f + raw * 0.15f;
-  }
+  // ---- Calculate SpO2 using empirical formula ----
+  // Using the standard empirical formula: SpO2 = 110 - 25*R
+  // Note: For accurate clinical readings, this should be calibrated with reference equipment
+  float raw = 110.0f - 25.0f * smoothR;
+  raw = constrain(raw, 70.0f, 100.0f);
+  smoothSpo2 = smoothSpo2 * 0.85f + raw * 0.15f;
   
   spo2 = smoothSpo2;
 

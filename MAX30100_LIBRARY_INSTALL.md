@@ -11,7 +11,7 @@ This firmware requires the MAX30100 library to communicate with the GY-MAX3010x 
 1. Open Arduino IDE
 2. Go to **Sketch** → **Include Library** → **Manage Libraries...**
 3. In the Library Manager search box, type: `MAX30100`
-4. Look for the library by **oxullo** (Interfacing the MAX30100)
+4. Look for the library by **milan** (MAX30100_milan)
 5. Click **Install**
 6. Wait for installation to complete
 
@@ -19,7 +19,7 @@ This firmware requires the MAX30100 library to communicate with the GY-MAX3010x 
 
 If the library is not available in Library Manager:
 
-1. Download the library from GitHub: https://github.com/oxullo/Arduino-MAX30100
+1. Download the library from GitHub: https://github.com/milankrakic/MAX30100
 2. Extract the downloaded ZIP file
 3. Copy the extracted folder to your Arduino libraries directory:
    - Windows: `Documents\Arduino\libraries\`
@@ -54,13 +54,23 @@ If the library is not available in Library Manager:
 
 ## Sensor Configuration
 
-The firmware configures the MAX30100 with these settings:
+The firmware configures the MAX30100 with these settings using the MAX30100_milan library API:
 - Mode: SpO2 + Heart Rate
-- ADC Range: 4096
-- Sample Rate: 100Hz
-- Pulse Width: 160μs
-- IR LED Current: 50mA
-- Red LED Current: 27mA
+- Sample Rate: 100Hz (MAX30100_SAMPRATE_100HZ)
+- Pulse Width: 1600μs 16-bit (MAX30100_SPC_PW_1600US_16BITS)
+- IR LED Current: 50mA (MAX30100_LED_CURR_50MA)
+- Red LED Current: 37mA (MAX30100_LED_CURR_37MA)
+
+## API Differences
+
+The MAX30100_milan library uses different method names and constants compared to other MAX30100 libraries:
+
+- `setSamplingRate()` instead of `setSampleRate()`
+- `setLedsPulseWidth()` instead of `setPulseWidth()`
+- `setLedsCurrent()` instead of separate `setIRLedCurrent()` and `setRedLedCurrent()`
+- `pulseOximeter.red` and `pulseOximeter.IR` instead of `getRawRed()` and `getRawIR()`
+- `MAX30100_SAMPRATE_100HZ` instead of `MAX30100_SAMPLERATE_100HZ`
+- `MAX30100_LED_CURR_50MA` instead of `MAX30100_IRCURR_50MA`
 
 ## Troubleshooting
 
