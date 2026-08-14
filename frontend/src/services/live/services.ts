@@ -472,7 +472,7 @@ export const liveDevices: IDeviceService = {
     // Return devices from local storage with updated online status
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 15000; // 15 seconds - device considered offline if no update in 15s
+    const offlineThreshold = 10000; // 10 seconds - device considered offline if no update in 10s
     
     return devices.map(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
@@ -809,10 +809,12 @@ export const liveStream: ISensorStream = {
   subscribe: (deviceId: string, onSample: (s: SensorSample) => void): (() => void) => {
     const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
     const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
+    const heartbeatTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/heartbeat`;
     
     console.log('=== MQTT SUBSCRIPTION START ===');
     console.log('Device ID:', deviceId);
     console.log('Telemetry topic:', telemetryTopic);
+    console.log('Heartbeat topic:', heartbeatTopic);
     console.log('MQTT Config:', env.MQTT);
     console.log('USE_MOCK:', env.USE_MOCK);
     
@@ -917,10 +919,40 @@ export const liveStream: ISensorStream = {
             mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
           };
           storeDevices(devices);
-          storeDevices(devices);
         }
       } catch (err) {
         console.error('Error parsing status message:', err);
+      }
+    });
+
+    const unsubscribeHeartbeat = mqttClient.subscribe(heartbeatTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        console.log('Device heartbeat received:', data);
+        
+        // Heartbeat always indicates device is online
+        const devices = getStoredDevices();
+        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
+        if (idx >= 0) {
+          devices[idx] = {
+            ...devices[idx],
+            online: true,
+            status: 'online',
+            lastSeen: new Date().toISOString(),
+            deviceState: data.state || devices[idx].deviceState,
+            battery: data.battery ?? devices[idx].battery,
+            batteryPct: data.battery ?? devices[idx].batteryPct,
+            wifi: {
+              ssid: devices[idx].wifi?.ssid || 'Connected',
+              rssi: data.wifi ?? devices[idx].wifi?.rssi ?? -50,
+              connected: true,
+            },
+            mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
+          };
+          storeDevices(devices);
+        }
+      } catch (err) {
+        console.error('Error parsing heartbeat message:', err);
       }
     });
 
@@ -928,6 +960,7 @@ export const liveStream: ISensorStream = {
     return () => {
       unsubscribeTelemetry();
       unsubscribeStatus();
+      unsubscribeHeartbeat();
     };
   },
 

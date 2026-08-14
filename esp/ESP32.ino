@@ -76,7 +76,7 @@ constexpr char WIFI_AP_PASSWORD[] = "12345678";
 constexpr int MQTT_PORT = 8883;
 constexpr int MQTT_KEEPALIVE_SEC = 60;
 constexpr int MQTT_QOS = 1;
-constexpr unsigned long HEARTBEAT_INTERVAL = 30000;
+constexpr unsigned long HEARTBEAT_INTERVAL = 5000; // Changed to 5 seconds for faster offline detection
 constexpr unsigned long TELEMETRY_INTERVAL = 1000;
 constexpr unsigned long OLED_REFRESH_INTERVAL = 200;
 constexpr unsigned long BATTERY_CHECK_INTERVAL = 250;
@@ -2162,10 +2162,17 @@ void publishHeartbeat() {
   jsonDoc["mqtt"] = mqttConnected ? "CONNECTED" : "DISCONNECTED";
   jsonDoc["uptime"] = uptime;
   jsonDoc["timestamp"] = millis();
+  jsonDoc["online"] = true; // Explicitly mark as online
   
   serializeJson(jsonDoc, mqttPayload);
   sprintf(mqttTopic, TOPIC_HEARTBEAT, deviceId.c_str());
   mqttClient.publish(mqttTopic, mqttPayload, MQTT_QOS);
+  
+  Serial.println(F("=== HEARTBEAT SENT ==="));
+  Serial.print(F("State: "));
+  Serial.println(getStateString());
+  Serial.print(F("Online: YES"));
+  Serial.println(F("=== END HEARTBEAT ==="));
 }
 
 // ============================================================
