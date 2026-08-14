@@ -472,7 +472,7 @@ export const liveDevices: IDeviceService = {
     // Return devices from local storage with updated online status
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 30000; // 30 seconds - device considered offline if no update in 30s
+    const offlineThreshold = 15000; // 15 seconds - device considered offline if no update in 15s
     
     return devices.map(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
@@ -483,8 +483,8 @@ export const liveDevices: IDeviceService = {
       const goodStates = ['READY', 'TESTING', 'SHOWING_CONCLUSION', 'CONNECTING_WIFI', 'CONNECTING_MQTT'];
       const stateBasedOnline = goodStates.includes(deviceState.toUpperCase());
       
-      // Device is online if either: it's within threshold OR state indicates it's working
-      const isOnline = !isOffline || stateBasedOnline;
+      // Device is online only if BOTH: it's within threshold AND state indicates it's working
+      const isOnline = !isOffline && stateBasedOnline;
       
       return {
         ...device,
