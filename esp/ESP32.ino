@@ -185,6 +185,7 @@ enum DeviceState {
   STATE_WAITING_PAIR,
   STATE_READY,
   STATE_TESTING,
+  STATE_SHOWING_CONCLUSION,
   STATE_PROCESSING,
   STATE_UPLOADING,
   STATE_COMPLETE,
@@ -300,6 +301,8 @@ unsigned long testDuration = 0;
 unsigned long lastSampleTime = 0;
 unsigned long sampleCount = 0;
 int stableSampleCount = 0; // Counts samples since finger detection
+bool showingConclusion = false;
+unsigned long conclusionStartTime = 0;
 
 // OLED
 unsigned long lastOledRefresh = 0;
@@ -329,6 +332,15 @@ unsigned long lastSensorFailure = 0;
 // Calibration Values (loaded from Preferences)
 float tempCalibrationOffset = TEMP_CALIBRATION_OFFSET;
 float tempCalibrationScale = TEMP_CALIBRATION_SCALE;
+
+// ============================================================
+// BEAT DETECTION CALLBACK
+// ============================================================
+void onBeatDetected() {
+  beatDetected = true;
+  lastBeatTime = millis();
+  Serial.println("BEAT");
+}
 
 // Buffers
 StaticJsonDocument<1024> jsonDoc;
@@ -490,8 +502,13 @@ void loop() {
     lastDebugOutput = currentMillis;
   }
   
-  // Test Sampling - Always run in test mode
-  runTestSampling();
+  // Always update sensor for finger detection and continuous readings
+  updateMAX30100();
+  
+  // Test Sampling - Only run when test is actually running
+  if (testRunning) {
+    runTestSampling();
+  }
   
   // Diagnostic sampling
   if (diagnosticMode) {
@@ -1476,7 +1493,9 @@ void stopTest() {
   
   testRunning = false;
   testDuration = millis() - testStartTime;
-  currentState = STATE_READY;
+  currentState = STATE_SHOWING_CONCLUSION;
+  showingConclusion = true;
+  conclusionStartTime = millis();
   
   Serial.print(F("Test Duration: "));
   Serial.print(testDuration / 1000);
@@ -1491,9 +1510,6 @@ void stopTest() {
 // RUN TEST SAMPLING
 // ============================================================
 void runTestSampling() {
-  // Update sensor continuously (no delay blocking)
-  updateMAX30100();
-  
   // Debug output every 2 seconds
   static unsigned long lastDebug = 0;
   if (millis() - lastDebug >= 2000) {
@@ -1856,39 +1872,23 @@ void updateOLED() {
       // Header
       display.println(F("READY"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-      // Sensor data - 2 column layout
+      // Basic info only - no readings until test starts
       display.setCursor(0, 12);
-      display.print(F("HR:"));
-      display.print((int)heartRate);
-      display.print(F("bpm"));
+      display.print(F("SpO2: --%"));
       display.setCursor(72, 12);
-      display.print(F("SpO2:"));
-      display.print((int)spo2);
-      display.print(F("%"));
+      display.print(F("Temp: --C"));
       display.setCursor(0, 22);
-      display.print(F("Temp:"));
-      display.print(temperature, 1);
-      display.print(F("C"));
+      display.print(F("Vitality: --"));
       display.setCursor(72, 22);
-      display.print(F("SQ:"));
-      display.print((int)signalQuality);
-      display.print(F("%"));
-      display.setCursor(0, 32);
-      display.print(F("VI:"));
-      display.print((int)vitalityIndex);
-      display.print(F("%"));
-      display.setCursor(72, 32);
-      drawBatteryIcon(72, 32);
-      display.setCursor(88, 32);
+      drawBatteryIcon(72, 22);
+      display.setCursor(88, 22);
       display.print((int)batteryPercent);
       display.print(F("%"));
-      // Probe quality
+      // Status
+      display.setCursor(0, 32);
+      display.print(F("Status: Ready"));
       display.setCursor(0, 44);
-      display.print(F("Probe: "));
-      display.print(probeQuality);
-      // Status bar
-      display.setCursor(0, 56);
-      display.print(F("Place probe to test"));
+      display.print(F("Press START to test"));
       break;
     case STATE_TESTING:
       // Header with elapsed time
@@ -1902,37 +1902,80 @@ void updateOLED() {
       }
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
-      // Simple display based on working example
-      display.setTextColor(SSD1306_WHITE);
-      display.setTextSize(1);
-      display.setCursor(32, 15);
-      display.println(F("PULP DEVICE"));
-      
-      // BPM
-      display.setTextSize(2);
-      display.setCursor(0, 28);
-      display.print(F("BPM:"));
-      if (heartRate >= 30 && heartRate <= 220) {
-        display.print((int)heartRate);
-      } else {
-        display.print(F("--"));
-      }
-      
-      // SpO2
-      display.setCursor(0, 52);
-      display.print(F("O2:"));
+      // Show SpO2, Temp, Vitality Status
+      display.setCursor(0, 12);
+      display.print(F("SpO2:"));
       if (spo2 >= 70 && spo2 <= 100) {
         display.print((int)spo2);
         display.print(F("%"));
       } else {
-        display.print(F("--"));
+        display.print(F("--%"));
       }
+      
+      display.setCursor(72, 12);
+      display.print(F("Temp:"));
+      display.print(temperature, 1);
+      display.print(F("C"));
+      
+      display.setCursor(0, 22);
+      display.print(F("Vitality:"));
+      display.print(vitalityStatus);
+      
+      display.setCursor(0, 32);
+      display.print(F("HR:"));
+      if (heartRate >= 30 && heartRate <= 220) {
+        display.print((int)heartRate);
+        display.print(F("bpm"));
+      } else {
+        display.print(F("--bpm"));
+      }
+      
+      display.setCursor(72, 32);
+      drawBatteryIcon(72, 32);
+      display.setCursor(88, 32);
+      display.print((int)batteryPercent);
+      display.print(F("%"));
       
       // Show beat detection indicator
       if (beatDetected) {
         display.setTextSize(1);
-        display.setCursor(100, 15);
+        display.setCursor(100, 22);
         display.print(F("♥"));
+      }
+      
+      break;
+    case STATE_SHOWING_CONCLUSION:
+      // Show final conclusion for 10 seconds
+      display.println(F("RESULTS"));
+      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      
+      display.setCursor(0, 12);
+      display.print(F("SpO2:"));
+      display.print((int)spo2);
+      display.print(F("%"));
+      
+      display.setCursor(72, 12);
+      display.print(F("Temp:"));
+      display.print(temperature, 1);
+      display.print(F("C"));
+      
+      display.setCursor(0, 22);
+      display.print(F("Vitality:"));
+      display.print(vitalityStatus);
+      
+      display.setCursor(0, 32);
+      display.print(F("Duration:"));
+      display.print(testDuration / 1000);
+      display.print(F("s"));
+      
+      display.setCursor(0, 44);
+      display.print(F("Returning to Ready..."));
+      
+      // Auto-return to READY after 10 seconds
+      if (millis() - conclusionStartTime >= 10000) {
+        currentState = STATE_READY;
+        showingConclusion = false;
+        Serial.println(F("Conclusion period ended, returning to READY"));
       }
       
       break;
