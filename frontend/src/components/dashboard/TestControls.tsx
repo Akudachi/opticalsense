@@ -31,6 +31,9 @@ type Props = {
 };
 
 export function TestControls(p: Props) {
+  const activeDevice = p.devices.find(d => d.id === p.deviceId);
+  const isDeviceOnline = activeDevice?.online ?? false;
+  
   return (
     <GlassCard>
       <div className="flex items-center justify-between">
@@ -70,7 +73,7 @@ export function TestControls(p: Props) {
           <Button
             className="col-span-2 bg-brand-gradient text-white shadow-glow hover:opacity-95"
             onClick={p.onStart}
-            disabled={!p.patientId || !p.deviceId}
+            disabled={!p.patientId || !p.deviceId || !isDeviceOnline}
           >
             <Play className="mr-2 h-4 w-4" /> Start Test
           </Button>
