@@ -1,7 +1,6 @@
 import { AppShell } from "@/components/layout/AppShell";
 import { StatusStrip } from "@/components/dashboard/StatusStrip";
 import { SensorCard } from "@/components/dashboard/SensorCard";
-import { LiveWaveform } from "@/components/dashboard/LiveWaveform";
 import { SignalQuality } from "@/components/dashboard/SignalQuality";
 import { DeviceStatusCard } from "@/components/dashboard/DeviceStatusCard";
 import { TestControls } from "@/components/dashboard/TestControls";
@@ -192,10 +191,6 @@ function DashboardPage() {
               <SensorCard label="Signal Quality" value={latest?.signalQuality ?? 0} suffix="%" icon={Waves} tint="rose" samples={displaySamples} metricKey="signalQuality" hint="Signal quality" />
               <SensorCard label="Vitality Index" value={latest?.vitalityIndex ?? 0} decimals={1} icon={Waves} tint="brand" samples={displaySamples} metricKey="vitalityIndex" hint="Vitality index" />
               <SensorCard label="Battery" value={latest?.battery ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="battery" hint="Device battery" />
-            </div>
-
-            <div className="flex-1 min-h-0">
-              <LiveWaveform samples={displaySamples} />
             </div>
 
             <div className="grid gap-2 grid-cols-2 flex-shrink-0">
