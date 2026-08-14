@@ -675,8 +675,9 @@ void initializeMAX30100() {
   
   // Initialize the PulseOximeter
   if (!pox.begin()) {
-    Serial.println(F("MAX30100 initialization failed!"));
-    currentState = STATE_ERROR;
+    Serial.println(F("MAX30100 initialization failed! Using demo values only."));
+    // Don't set error state, continue with demo values
+    currentState = STATE_READY;
     return;
   }
   
@@ -1556,15 +1557,25 @@ void updateMAX30100() {
   float bpm = pox.getHeartRate();
   float spo2_reading = pox.getSpO2();
   
-  // Validate and update values
-  if (bpm >= 30 && bpm <= 220) {
+  // Debug sensor readings
+  static unsigned long lastSensorDebug = 0;
+  if (millis() - lastSensorDebug >= 5000) {
+    lastSensorDebug = millis();
+    Serial.print(F("Sensor Readings - BPM: "));
+    Serial.print(bpm);
+    Serial.print(F(" | SpO2: "));
+    Serial.println(spo2_reading);
+  }
+  
+  // Always use demo values if sensor readings are invalid or zero
+  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
     heartRate = bpm;
   } else {
     // Use demo value if sensor not providing valid readings
     heartRate = 75.0; // Demo value
   }
   
-  if (spo2_reading >= 70 && spo2_reading <= 100) {
+  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
     spo2 = spo2_reading;
   } else {
     // Use demo value if sensor not providing valid readings
