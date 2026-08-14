@@ -178,27 +178,27 @@ function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="h-full flex flex-col p-4 gap-3">
+      <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto">
         <StatusStrip status={status} />
 
-        <div className="flex-1 grid gap-3 lg:grid-cols-[1fr_280px] min-h-0">
-          <div className="flex flex-col gap-3 min-h-0">
-            <div className="grid gap-2 grid-cols-3 flex-shrink-0">
+        <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
+          <div className="flex flex-col gap-3">
+            <div className="grid gap-2 grid-cols-3">
               <SensorCard label="SpO₂" value={latest?.spo2 ?? 0} decimals={1} suffix="%" icon={HeartPulse} tint="brand" samples={displaySamples} metricKey="spo2" hint="Peripheral oxygen saturation" />
               <SensorCard label="Pulse" value={latest?.heartRate ?? 0} suffix=" bpm" icon={Activity} tint="teal" samples={displaySamples} metricKey="heartRate" hint="Heart rate" />
               <SensorCard label="Temperature" value={latest?.temperature ?? 0} decimals={2} suffix=" °C" icon={Thermometer} tint="amber" samples={displaySamples} metricKey="temperature" hint="Ambient / probe" />
             </div>
-            <div className="grid gap-2 grid-cols-3 flex-shrink-0">
+            <div className="grid gap-2 grid-cols-3">
               <SensorCard label="Signal Quality" value={latest?.signalQuality ?? 0} suffix="%" icon={Waves} tint="rose" samples={displaySamples} metricKey="signalQuality" hint="Signal quality" />
               <SensorCard label="Vitality Index" value={latest?.vitalityIndex ?? 0} decimals={1} icon={Waves} tint="brand" samples={displaySamples} metricKey="vitalityIndex" hint="Vitality index" />
               <SensorCard label="Battery" value={latest?.battery ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="battery" hint="Device battery" />
             </div>
 
-            <div className="h-64 min-h-0">
+            <div className="h-96">
               <LiveWaveform samples={displaySamples} />
             </div>
 
-            <div className="grid gap-2 grid-cols-2 flex-shrink-0">
+            <div className="grid gap-2 grid-cols-2">
               <SignalQuality latest={latest} />
               <GlassCard>
                 <div className="text-xs text-muted-foreground">Measurement Confidence</div>
@@ -215,7 +215,7 @@ function DashboardPage() {
             </div>
           </div>
 
-          <aside className="flex flex-col gap-3 min-h-0 overflow-y-auto">
+          <aside className="flex flex-col gap-3">
             <DeviceStatusCard device={activeDevice} />
 
             {activePatient && (

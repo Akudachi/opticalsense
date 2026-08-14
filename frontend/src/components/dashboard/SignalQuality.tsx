@@ -11,6 +11,10 @@ export function SignalQuality({ latest }: Props) {
   const probe = latest?.probeQuality ?? "—";
   const motion = latest?.motionDetected ?? false;
   const saturated = latest?.sensorSaturated ?? false;
+  
+  // Use signal quality as confidence since HR/SpO2 confidence fields are not available
+  const hrConf = q > 0 ? q.toFixed(0) : "—";
+  const spo2Conf = q > 0 ? q.toFixed(0) : "—";
 
   return (
     <GlassCard>
@@ -41,11 +45,11 @@ export function SignalQuality({ latest }: Props) {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground">HR Conf:</span>
-          <span>{latest?.heartRateConfidence?.toFixed(0) ?? "—"}%</span>
+          <span>{hrConf}%</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground">SpO₂ Conf:</span>
-          <span>{latest?.spo2Confidence?.toFixed(0) ?? "—"}%</span>
+          <span>{spo2Conf}%</span>
         </div>
         <div className="flex items-center gap-1.5">
           {motion && <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
