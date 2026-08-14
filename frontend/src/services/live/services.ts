@@ -247,6 +247,21 @@ export const liveTests: ITestService = {
     
     addActivityEvent('test_started', `Test started for patient ${data.patientId}`, newTest.id);
     
+    // Send start command to device via MQTT
+    try {
+      await mqttClient.connect();
+      const commandTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/commands`;
+      const commandData = {
+        command: 'start_test',
+        testId: newTest.id,
+        timestamp: new Date().toISOString()
+      };
+      mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+      console.log('Sent start_test command to device:', data.deviceId);
+    } catch (err) {
+      console.error('Failed to send start command:', err);
+    }
+    
     return newTest;
   },
   
@@ -254,6 +269,23 @@ export const liveTests: ITestService = {
     const tests = getStoredTests();
     const index = tests.findIndex(t => t.id === id);
     if (index >= 0) {
+      const test = tests[index];
+      
+      // Send stop command to device via MQTT
+      try {
+        await mqttClient.connect();
+        const commandTopic = `${env.MQTT.topicPrefix}/device/${test.deviceId}/commands`;
+        const commandData = {
+          command: 'stop_test',
+          testId: id,
+          timestamp: new Date().toISOString()
+        };
+        mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+        console.log('Sent stop_test command to device:', test.deviceId);
+      } catch (err) {
+        console.error('Failed to send stop command:', err);
+      }
+      
       tests[index] = {
         ...tests[index],
         endedAt: new Date().toISOString(),

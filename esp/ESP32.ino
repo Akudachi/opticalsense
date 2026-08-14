@@ -899,6 +899,8 @@ void setupWebServer() {
   server.on("/start", handleWebStart);
   server.on("/stop", handleWebStop);
   server.on("/factory-reset", handleWebFactoryReset);
+  server.on("/api/start", handleWebStart);  // API endpoint for website
+  server.on("/api/stop", handleWebStop);    // API endpoint for website
   server.onNotFound(handleWebRoot);  // Redirect all requests to root
 }
 
@@ -1221,8 +1223,20 @@ void handleCommand() {
   
   if (command == "start_test") {
     startTest();
+    jsonDoc.clear();
+    jsonDoc["status"] = "success";
+    jsonDoc["message"] = "Test started";
+    String response;
+    serializeJson(jsonDoc, response);
+    mqttClient.publish((mqttTopic + 1).c_str(), response.c_str());
   } else if (command == "stop_test") {
     stopTest();
+    jsonDoc.clear();
+    jsonDoc["status"] = "success";
+    jsonDoc["message"] = "Test stopped";
+    String response;
+    serializeJson(jsonDoc, response);
+    mqttClient.publish((mqttTopic + 1).c_str(), response.c_str());
   } else if (command == "restart") {
     ESP.restart();
   } else if (command == "factory_reset") {
@@ -1271,10 +1285,6 @@ void checkPairing() {
     currentState = STATE_READY;
     Serial.print(F("State set to READY. Current state: "));
     Serial.println(getStateString());
-    
-    // Auto-start test mode for continuous real sensor readings
-    Serial.println(F("Auto-starting test mode for continuous sensor readings"));
-    startTest();
     
     return;
   }
@@ -1390,12 +1400,8 @@ void handlePairResponse() {
     display.clearDisplay();
     updateOLED();
     
-    // Auto-start test mode after pairing for continuous real sensor readings
-    Serial.println(F("Auto-starting test mode for continuous sensor readings"));
-    startTest();
-    
     // Publish acknowledgment
-    publishLog("Pair Successful - Test Started");
+    publishLog("Pair Successful");
     
     Serial.println(F("=== HANDLE PAIR RESPONSE END (SUCCESS) ==="));
   } else {
@@ -1665,7 +1671,7 @@ void checkBattery() {
   static unsigned long lastBatteryUpdate = 0;
   static float demoBatteryPercent = 80.0;
   
-  if (millis() - lastBatteryUpdate > 60000) { // Update every minute
+  if (millis() - lastBatteryUpdate > 5000) { // Update every 5 seconds for faster updates
     // Simulate gradual battery drain
     demoBatteryPercent -= 0.1;
     if (demoBatteryPercent < 75.0) {
@@ -1700,7 +1706,7 @@ void checkTemperature() {
   static float demoTemperature = 36.6;
   
   // Generate demo temperature data (36.0-37.5°C range with small variations)
-  if (millis() - lastTempUpdate > 60000) { // Update every minute
+  if (millis() - lastTempUpdate > 5000) { // Update every 5 seconds for faster updates
     demoTemperature = 36.0 + random(0, 16) / 10.0; // 36.0 to 37.5
     lastTempUpdate = millis();
   }
