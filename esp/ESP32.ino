@@ -1571,10 +1571,16 @@ void updateMAX30100() {
     Serial.println((spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) ? "YES" : "NO");
   }
   
-  // Force demo values for now to ensure display works
-  // Remove this when sensor is actually working
-  heartRate = 75.0; // Demo value
-  spo2 = 98.0; // Demo value
+  // Use real sensor values when valid, otherwise keep last known values
+  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
+    heartRate = bpm;
+  }
+  // If invalid, keep last known value (don't set to 0)
+  
+  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
+    spo2 = spo2_reading;
+  }
+  // If invalid, keep last known value (don't set to 0)
   
   // Update finger detection based on valid readings
   fingerDetected = (heartRate > 0 || spo2 > 0);
@@ -1590,11 +1596,6 @@ void updateMAX30100() {
     signalQuality = min(signalQuality + 5.0f, 100.0f);
   } else {
     signalQuality = max(signalQuality - 2.0f, 0.0f);
-  }
-  
-  // If signal quality is too low, use demo values
-  if (signalQuality < 30) {
-    signalQuality = 85.0; // Demo value
   }
   
   // Calculate vitality index based on signal quality and readings
