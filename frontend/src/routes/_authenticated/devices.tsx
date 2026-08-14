@@ -18,7 +18,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Battery, Cpu, Plus, RefreshCw, Signal, Trash2, Wifi, Wrench } from "lucide-react";
+import { Battery, Cpu, Plus, RefreshCw, Trash2, Wifi, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -78,9 +78,8 @@ function DevicesPage() {
                 {d.online ? "Online" : "Offline"}
               </Badge>
             </div>
-            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
               <Stat icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={d.wifi?.connected ? `${d.wifi.rssi} dBm` : "—"} />
-              <Stat icon={<Signal className="h-3.5 w-3.5" />} label="Signal" value={`${d.signalStrength ?? 0}%`} />
               <Stat icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${d.batteryPct ?? 0}%`} />
               <Stat icon={<Cpu className="h-3.5 w-3.5" />} label="MQTT" value={d.mqtt ?? "unknown"} />
             </div>

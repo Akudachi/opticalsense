@@ -553,29 +553,111 @@ export const liveDevices: IDeviceService = {
   },
   
   refresh: async (id: string): Promise<Device> => {
-    // Update device lastSeen to current time and check status
+    // Actually check device status by attempting to get recent telemetry
     const devices = getStoredDevices();
     const index = devices.findIndex(d => d.id === id);
     if (index >= 0) {
+      const device = devices[index];
       const now = Date.now();
       const offlineThreshold = 60000; // 60 seconds
-      const lastSeenTime = new Date(devices[index].lastSeen).getTime();
+      const lastSeenTime = new Date(device.lastSeen).getTime();
       const isOffline = now - lastSeenTime > offlineThreshold;
       
-      devices[index] = {
-        ...devices[index],
-        lastSeen: new Date().toISOString(),
-        online: !isOffline,
-        status: isOffline ? 'offline' : 'online',
-      };
-      storeDevices(devices);
-      return devices[index];
+      // If device is offline, try to check if it's actually responsive
+      if (isOffline) {
+        console.log('Device appears offline, checking if actually responsive...');
+        
+        // Try to subscribe to status topic to check if device responds
+        return new Promise(async (resolve, reject) => {
+          try {
+            await mqttClient.connect();
+          } catch (err) {
+            console.error('Failed to connect to MQTT:', err);
+            // Keep device offline if MQTT connection fails
+            devices[index] = {
+              ...device,
+              online: false,
+              status: 'offline',
+            };
+            storeDevices(devices);
+            resolve(devices[index]);
+            return;
+          }
+          
+          const statusTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/status`;
+          let messageReceived = false;
+          
+          const timeout = setTimeout(() => {
+            if (!messageReceived) {
+              console.log('No status response received, device is truly offline');
+              devices[index] = {
+                ...device,
+                online: false,
+                status: 'offline',
+              };
+              storeDevices(devices);
+              resolve(devices[index]);
+            }
+          }, 5000); // 5 second timeout for status check
+          
+          const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
+            if (!messageReceived) {
+              messageReceived = true;
+              clearTimeout(timeout);
+              unsubscribe();
+              
+              try {
+                const data = JSON.parse(message.toString());
+                console.log('Received status message during refresh:', data);
+                
+                // Only mark as online if status explicitly says online
+                const isOnline = data.status?.toLowerCase().includes('online') || false;
+                
+                devices[index] = {
+                  ...device,
+                  online: isOnline,
+                  status: isOnline ? 'online' : 'offline',
+                  lastSeen: new Date().toISOString(),
+                  battery: data.battery || device.battery,
+                  batteryPct: data.battery || device.batteryPct,
+                  wifi: { 
+                    ssid: device.wifi?.ssid || 'Unknown', 
+                    rssi: data.wifi || device.wifi?.rssi || -50, 
+                    connected: isOnline 
+                  },
+                  mqtt: data.mqtt || 'unknown',
+                };
+                storeDevices(devices);
+                resolve(devices[index]);
+              } catch (err) {
+                console.error('Error parsing status message:', err);
+                devices[index] = {
+                  ...device,
+                  online: false,
+                  status: 'offline',
+                };
+                storeDevices(devices);
+                resolve(devices[index]);
+              }
+            }
+          });
+        });
+      } else {
+        // Device is within threshold, keep current status
+        devices[index] = {
+          ...device,
+          online: true,
+          status: 'online',
+        };
+        storeDevices(devices);
+        return devices[index];
+      }
     }
     throw new Error('Device not found');
   },
   
   repair: async (id: string): Promise<Device> => {
-    // Re-pair device by subscribing to its status topic
+    // Strong repair logic - actually check if device is responsive
     return new Promise(async (resolve, reject) => {
       const devices = getStoredDevices();
       const device = devices.find(d => d.id === id);
@@ -595,31 +677,17 @@ export const liveDevices: IDeviceService = {
         return;
       }
       
-      const timeout = setTimeout(() => {
-        console.error('Repair timeout - no status update received');
-        reject(new Error('Repair timeout - no status update received'));
-      }, 15000);
+      let messageReceived = false;
+      let isActuallyOnline = false;
       
-      const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
-        console.log('Received status message during repair:', message.toString());
-        try {
-          const data = JSON.parse(message.toString());
-          clearTimeout(timeout);
-          unsubscribe();
-          
+      const timeout = setTimeout(() => {
+        if (!messageReceived) {
+          console.log('Repair timeout - no status update received, device is offline');
           const updatedDevice: Device = {
             ...device,
-            online: data.status?.toLowerCase().includes('online') || false,
-            status: data.status?.toLowerCase().includes('online') ? 'online' : 'offline',
-            battery: data.battery || device.battery,
-            batteryPct: data.battery || device.batteryPct,
+            online: false,
+            status: 'offline',
             lastSeen: new Date().toISOString(),
-            wifi: { 
-              ssid: device.wifi?.ssid || 'Unknown', 
-              rssi: data.wifi || device.wifi?.rssi || -50, 
-              connected: true 
-            },
-            mqtt: data.mqtt || 'connected',
           };
           
           const deviceIndex = devices.findIndex(d => d.id === id);
@@ -628,10 +696,68 @@ export const liveDevices: IDeviceService = {
             storeDevices(devices);
           }
           
-          console.log('Device repaired:', updatedDevice);
-          resolve(updatedDevice);
-        } catch (err) {
-          console.error('Error parsing status message:', err);
+          reject(new Error('Device is offline - no response received'));
+        }
+      }, 10000); // 10 second timeout
+      
+      const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
+        if (!messageReceived) {
+          messageReceived = true;
+          clearTimeout(timeout);
+          unsubscribe();
+          
+          try {
+            const data = JSON.parse(message.toString());
+            console.log('Received status message during repair:', data);
+            
+            // Only mark as online if status explicitly says online
+            isActuallyOnline = data.status?.toLowerCase().includes('online') || false;
+            
+            const updatedDevice: Device = {
+              ...device,
+              online: isActuallyOnline,
+              status: isActuallyOnline ? 'online' : 'offline',
+              battery: data.battery || device.battery,
+              batteryPct: data.battery || device.batteryPct,
+              lastSeen: new Date().toISOString(),
+              wifi: { 
+                ssid: device.wifi?.ssid || 'Unknown', 
+                rssi: data.wifi || device.wifi?.rssi || -50, 
+                connected: isActuallyOnline 
+              },
+              mqtt: data.mqtt || 'unknown',
+            };
+            
+            const deviceIndex = devices.findIndex(d => d.id === id);
+            if (deviceIndex >= 0) {
+              devices[deviceIndex] = updatedDevice;
+              storeDevices(devices);
+            }
+            
+            if (isActuallyOnline) {
+              console.log('Device repaired and is online:', updatedDevice);
+              resolve(updatedDevice);
+            } else {
+              console.log('Device responded but reports offline status');
+              reject(new Error('Device is offline'));
+            }
+          } catch (err) {
+            console.error('Error parsing status message:', err);
+            const updatedDevice: Device = {
+              ...device,
+              online: false,
+              status: 'offline',
+              lastSeen: new Date().toISOString(),
+            };
+            
+            const deviceIndex = devices.findIndex(d => d.id === id);
+            if (deviceIndex >= 0) {
+              devices[deviceIndex] = updatedDevice;
+              storeDevices(devices);
+            }
+            
+            reject(new Error('Error parsing device status'));
+          }
         }
       });
     });

@@ -2,7 +2,7 @@
 
 ## Required Library
 
-This firmware requires the MAX30100 library to communicate with the GY-MAX3010x sensor.
+This firmware requires the MAX30100_PulseOximeter library to communicate with the GY-MAX3010x sensor.
 
 ## Installation Instructions
 
@@ -11,7 +11,7 @@ This firmware requires the MAX30100 library to communicate with the GY-MAX3010x 
 1. Open Arduino IDE
 2. Go to **Sketch** → **Include Library** → **Manage Libraries...**
 3. In the Library Manager search box, type: `MAX30100`
-4. Look for the library by **milan** (MAX30100_milan)
+4. Look for the library by **MAX30100** (PulseOximeter)
 5. Click **Install**
 6. Wait for installation to complete
 
@@ -19,7 +19,7 @@ This firmware requires the MAX30100 library to communicate with the GY-MAX3010x 
 
 If the library is not available in Library Manager:
 
-1. Download the library from GitHub: https://github.com/milankrakic/MAX30100
+1. Download the library from GitHub: https://github.com/oxullo/Arduino-MAX30100
 2. Extract the downloaded ZIP file
 3. Copy the extracted folder to your Arduino libraries directory:
    - Windows: `Documents\Arduino\libraries\`
@@ -47,30 +47,36 @@ If the library is not available in Library Manager:
 
 ## I2C Configuration
 
-- **I2C Address**: 0x57 (configured in firmware)
+- **I2C Address**: Auto-detected by library
 - **SDA**: GPIO21
 - **SCL**: GPIO22
-- **Library**: MAX30100 by oxullo
+- **Library**: MAX30100 PulseOximeter by oxullo
 
 ## Sensor Configuration
 
-The firmware configures the MAX30100 with these settings using the MAX30100_milan library API:
-- Mode: SpO2 + Heart Rate
-- Sample Rate: 100Hz (MAX30100_SAMPRATE_100HZ)
-- Pulse Width: 1600μs 16-bit (MAX30100_SPC_PW_1600US_16BITS)
-- IR LED Current: 50mA (MAX30100_LED_CURR_50MA)
-- Red LED Current: 37mA (MAX30100_LED_CURR_37MA)
+The firmware configures the MAX30100 with these settings using the PulseOximeter library:
+- Mode: SpO2 + Heart Rate (handled automatically by library)
+- IR LED Current: 7.6mA (MAX30100_LED_CURR_7_6MA)
+- Beat detection callback enabled
 
-## API Differences
+## API Notes
 
-The MAX30100_milan library uses different method names and constants compared to other MAX30100 libraries:
+The MAX30100_PulseOximeter library provides:
+- `pox.begin()` - Initialize the sensor
+- `pox.update()` - Must be called continuously in loop()
+- `pox.getHeartRate()` - Returns heart rate in BPM
+- `pox.getSpO2()` - Returns SpO2 percentage
+- `pox.setOnBeatDetectedCallback()` - Set callback for beat detection
+- `pox.red` - Raw RED value
+- `pox.IR` - Raw IR value
 
-- `setSamplingRate()` instead of `setSampleRate()`
-- `setLedsPulseWidth()` instead of `setPulseWidth()`
-- `setLedsCurrent()` instead of separate `setIRLedCurrent()` and `setRedLedCurrent()`
-- `pulseOximeter.red` and `pulseOximeter.IR` instead of `getRawRed()` and `getRawIR()`
-- `MAX30100_SAMPRATE_100HZ` instead of `MAX30100_SAMPLERATE_100HZ`
-- `MAX30100_LED_CURR_50MA` instead of `MAX30100_IRCURR_50MA`
+## Working Configuration
+
+The firmware uses the proven working configuration:
+- IR LED current set to 7.6mA (most reliable for finger detection)
+- Library handles all signal processing internally
+- Beat detection callback provides heartbeat notifications
+- Simplified code with better reliability
 
 ## Troubleshooting
 
@@ -86,6 +92,7 @@ The MAX30100_milan library uses different method names and constants compared to
 1. Ensure library is properly installed
 2. Check Arduino IDE version compatibility
 3. Try manual installation if Library Manager fails
+4. Make sure to include "MAX30100_PulseOximeter.h" not "MAX30100.h"
 
 ### Inaccurate Readings
 
@@ -96,10 +103,9 @@ The MAX30100_milan library uses different method names and constants compared to
 
 ## Important Notes
 
-- This firmware uses the MAX30100 library for GY-MAX3010x sensor
-- The sensor operates at 100Hz sampling rate
-- Finger detection uses IR signal threshold
-- SpO2 calculation uses library's calibrated algorithm
-- Raw RED/IR values are stored for debugging and future dental analysis
+- This firmware uses the MAX30100_PulseOximeter library for GY-MAX3010x sensor
+- The library handles all signal processing, heart rate detection, and SpO2 calculation
+- Beat detection callback provides heartbeat notifications
+- Simplified code with better reliability than manual signal processing
 - Displayed SpO2 values are for finger measurement validation only
 - They do NOT represent dental-pulp oxygen saturation

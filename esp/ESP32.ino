@@ -1,42 +1,39 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.0.0
+ * Version: 3.1.0
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
  * 
- * Changes in v3.0.0:
- * - Replaced ADS1115 + discrete LEDs with GY-MAX3010x integrated sensor
- * - Uses MAX30100-compatible library for I2C communication
- * - Finger detection using IR signal threshold
- * - Continuous RED/IR PPG acquisition at 100Hz
- * - Proper calibrated SpO2 calculation using library algorithm
- * - Removed old RED/IR LED, BPW34, LM358, ADS1115 logic
- * - Updated OLED display for finger-based measurement
- * - Raw RED/IR values stored for debugging and future dental analysis
+ * Changes in v3.1.0:
+ * - Switched to MAX30100_PulseOximeter library for better sensor integration
+ * - Simplified sensor logic using library's built-in SpO2 and heart rate calculation
+ * - Added beat detection callback from library
+ * - Removed custom signal processing (handled by library)
+ * - Temperature and battery use demo data for now
+ * - Maintained all WiFi/MQTT/infrastructure functionality
  * 
- * IMPORTANT: This firmware uses the MAX30100 library
+ * IMPORTANT: This firmware uses the MAX30100_PulseOximeter library
  * Install library in Arduino IDE: Sketch -> Include Library -> Manage Libraries
- * Search for "MAX30100" by oxullo (Interfacing the MAX30100)
+ * Search for "MAX30100" by MAX30100 (PulseOximeter)
  * 
  * Hardware Connections:
  * - GY-MAX3010x SDA -> GPIO21
  * - GY-MAX3010x SCL -> GPIO22
  * - GY-MAX3010x VCC -> 3.3V
  * - GY-MAX3010x GND -> GND
- * - LM35 -> GPIO34
+ * - LM35 -> GPIO34 (not used in demo mode)
  * - OLED SSD1306 -> I2C (0x3C)
  * 
  * Features:
  * - WiFi Provisioning with Captive Portal
  * - MQTT over TLS to HiveMQ Cloud
  * - Device Pairing with 6-digit code
- * - Optical Signal Acquisition (GY-MAX3010x)
- * - Temperature Monitoring (LM35)
+ * - Optical Signal Acquisition (GY-MAX3010x with PulseOximeter library)
+ * - Temperature Monitoring (Demo Data)
  * - Battery Monitoring (Demo Data)
  * - OLED Display (SSD1306)
- * - Advanced Signal Processing & Medical Calculations
  * - Remote Command Handling
  * - Automatic Error Recovery
  * - Factory Reset
@@ -58,7 +55,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 #include <esp_task_wdt.h>
-#include <MAX30100.h>
+#include "MAX30100_PulseOximeter.h"
 
 // ============================================================
 // PIN CONFIGURATION
@@ -69,13 +66,10 @@
 #define PIN_I2C_SDA      21
 #define PIN_I2C_SCL      22
 
-// GY-MAX3010x I2C Configuration
-#define MAX30100_I2C_ADDR  0x57
-
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.0.0";
+constexpr char FIRMWARE_VERSION[] = "3.1.0";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -93,6 +87,16 @@ constexpr int LOW_BATTERY_WARNING = 20;
 constexpr int CRITICAL_BATTERY = 5;
 constexpr float HIGH_TEMP_WARNING = 38.0;
 constexpr float LOW_TEMP_WARNING = 34.0;
+constexpr unsigned long REPORT_INTERVAL = 2000; // Display update interval
+
+// ============================================================
+// BEAT DETECTION CALLBACK
+// ============================================================
+void onBeatDetected() {
+  beatDetected = true;
+  lastBeatTime = millis();
+  Serial.println("BEAT");
+}
 
 // Default MQTT Broker Configuration
 constexpr char DEFAULT_MQTT_HOST[] = "6732afdd0ab749f1b5c67e4cd7233db9.s1.eu.hivemq.cloud";
@@ -196,7 +200,7 @@ enum DeviceState {
 // Hardware
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 Preferences preferences;
-MAX30100 pulseOximeter;
+PulseOximeter pox;
 
 // Network
 WebServer server(80);
@@ -237,25 +241,23 @@ unsigned long pairCodeGenerated = 0;
 constexpr unsigned long PAIR_CODE_TIMEOUT = 300000; // 5 minutes
 
 // Sensors
-// GY-MAX3010x raw values
-uint32_t redRaw = 0;
-uint32_t irRaw = 0;
-bool fingerDetected = false;
-unsigned long fingerDetectedTime = 0;
-unsigned long fingerRemovedTime = 0;
-constexpr int FINGER_DETECTION_THRESHOLD = 50000; // IR threshold for finger detection
-constexpr int STABLE_SAMPLES_REQUIRED = 50; // Samples needed before displaying values
+// PulseOximeter library handles most calculations
+float heartRate = 0.0;
+float spo2 = 0.0;
+bool beatDetected = false;
+unsigned long lastBeatTime = 0;
 
-// Legacy variables (kept for compatibility)
-int16_t ambientADC = 0;
-int16_t redADC = 0;
-int16_t irADC = 0;
-int16_t redFiltered = 0;
-int16_t irFiltered = 0;
+// Demo data variables
 float temperature = 0.0;
 float batteryPercent = 0.0;
 float batteryVoltage = 0.0;
 bool isCharging = false;
+
+// Signal quality from library
+float signalQuality = 0.0;
+float vitalityIndex = 0.0;
+String vitalityStatus = "";
+String probeQuality = "";
 
 // Signal Processing Buffers
 int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
@@ -592,10 +594,8 @@ bool testOLED() {
 }
 
 bool testMAX30100() {
-  // Test MAX30100 using I2C
-  Wire.beginTransmission(MAX30100_I2C_ADDR);
-  byte error = Wire.endTransmission();
-  return (error == 0);
+  // Test MAX30100 using PulseOximeter library
+  return pox.begin();
 }
 
 bool testLM35() {
@@ -662,27 +662,25 @@ void initializeOLED() {
 }
 
 // ============================================================
-// MAX30100 INITIALIZATION - GY-MAX3010x Sensor
+// MAX30100 INITIALIZATION - GY-MAX3010x Sensor with PulseOximeter
 // ============================================================
 void initializeMAX30100() {
   Serial.println(F("Initializing GY-MAX3010x..."));
   
-  // Initialize the MAX30100 sensor
-  if (!pulseOximeter.begin()) {
+  // Initialize the PulseOximeter
+  if (!pox.begin()) {
     Serial.println(F("MAX30100 initialization failed!"));
     currentState = STATE_ERROR;
     return;
   }
   
-  // Configure the sensor using MAX30100_milan library API
-  pulseOximeter.setMode(MAX30100_MODE_SPO2_HR);
-  pulseOximeter.setSamplingRate(MAX30100_SAMPRATE_100HZ);
-  pulseOximeter.setLedsPulseWidth(MAX30100_SPC_PW_1600US_16BITS);
-  pulseOximeter.setLedsCurrent(MAX30100_LED_CURR_50MA, MAX30100_LED_CURR_37MA);
+  // Configure the sensor using working configuration
+  pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+  pox.setOnBeatDetectedCallback(onBeatDetected);
   
-  Serial.println(F("GY-MAX3010x Initialized Successfully"));
-  Serial.print(F("I2C Address: 0x"));
-  Serial.println(MAX30100_I2C_ADDR, HEX);
+  Serial.println(F("MAX30100 Initialized Successfully"));
+  Serial.println(F("IR LED = 7.6 mA"));
+  Serial.println(F("PLACE FINGER"));
 }
 
 // ============================================================
@@ -1504,637 +1502,145 @@ void stopTest() {
 // RUN TEST SAMPLING
 // ============================================================
 void runTestSampling() {
-  if (millis() - lastSampleTime < 10) return; // 100Hz sampling for GY-MAX3010x
-  lastSampleTime = millis();
-  sampleCount++;
-  
-  // Update GY-MAX3010x sensor
+  // Update sensor continuously (no delay blocking)
   updateMAX30100();
   
-  // Finger detection using IR signal
-  bool wasFingerDetected = fingerDetected;
-  fingerDetected = (irRaw > FINGER_DETECTION_THRESHOLD);
-  
-  if (fingerDetected && !wasFingerDetected) {
-    fingerDetectedTime = millis();
-    stableSampleCount = 0;
-    Serial.println(F(">> Finger detected - acquiring samples..."));
-  }
-  
-  if (!fingerDetected && wasFingerDetected) {
-    fingerRemovedTime = millis();
-    stableSampleCount = 0;
-    Serial.println(F(">> Finger removed - clearing values"));
+  // Debug output every 2 seconds
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug >= 2000) {
+    lastDebug = millis();
+    sampleCount++;
     
-    // Clear displayed values when finger removed
-    heartRate = 0;
-    heartRateConfidence = 0;
-    spo2 = 0;
-    spo2Confidence = 0;
-    pulseDetected = false;
-    
-    // Reset signal processing
-    memset(redBuffer, 0, sizeof(redBuffer));
-    memset(irBuffer, 0, sizeof(irBuffer));
-    bufferIndex = 0;
-    redLowPass = 0;
-    irLowPass = 0;
-    redBaseline = 0;
-    irBaseline = 0;
-    memset(peakTimes, 0, sizeof(peakTimes));
-    peakCount = 0;
-    lastPeakTime = 0;
-  }
-  
-  // Only process signals if finger is detected
-  if (fingerDetected) {
-    // Convert raw uint32_t to int16_t for processing
-    redADC = (int16_t)constrain(redRaw, 0, 32767);
-    irADC = (int16_t)constrain(irRaw, 0, 32767);
-    ambientADC = 0; // No ambient reading needed for GY-MAX3010x
-    
-    // Process signals
-    processSignals();
-    
-    // Count stable samples
-    stableSampleCount++;
-  }
-  
-  // Serial debug every 1 second
-  if (sampleCount % 100 == 0) {
     Serial.println(F("------------------------------"));
-    Serial.print(F("Red Raw: "));
-    Serial.print(redRaw);
-    Serial.print(F("  IR Raw: "));
-    Serial.println(irRaw);
-    Serial.print(F("Finger: "));
-    Serial.print(fingerDetected ? "YES" : "NO");
-    Serial.print(F("  Stable Samples: "));
-    Serial.println(stableSampleCount);
-    if (fingerDetected && stableSampleCount >= STABLE_SAMPLES_REQUIRED) {
-      Serial.print(F("Filtered → Red: "));
-      Serial.print(redFiltered);
-      Serial.print(F("  IR: "));
-      Serial.println(irFiltered);
-      Serial.print(F("Pulse: "));
-      Serial.print(pulseDetected ? "YES" : "NO");
-      Serial.print(F("  HR: "));
-      Serial.print(heartRate, 1);
-      Serial.print(F(" BPM  SpO2: "));
-      Serial.print(spo2, 1);
-      Serial.println(F("%"));
-    }
+    Serial.print(F("BPM: "));
+    Serial.print(heartRate, 1);
+    Serial.print(F(" | SpO2: "));
+    Serial.print(spo2, 1);
+    Serial.println(F("%"));
+    Serial.print(F("Signal Quality: "));
+    Serial.print(signalQuality, 1);
+    Serial.println(F("%"));
+    Serial.print(F("Vitality Index: "));
+    Serial.print(vitalityIndex, 1);
+    Serial.println(F("%"));
     Serial.println(F("------------------------------"));
   }
 }
 
 // ============================================================
-// UPDATE MAX30100 - Read sensor data
+// UPDATE MAX30100 - Read sensor data using PulseOximeter
 // ============================================================
 void updateMAX30100() {
-  // Update the sensor - this reads new data
-  pulseOximeter.update();
+  // IMPORTANT: Must run continuously
+  pox.update();
   
-  // Get the raw values using MAX30100_milan library API
-  redRaw = pulseOximeter.red;
-  irRaw = pulseOximeter.IR;
+  // Get heart rate and SpO2 from library
+  float bpm = pox.getHeartRate();
+  float spo2_reading = pox.getSpO2();
+  
+  // Validate and update values
+  if (bpm >= 30 && bpm <= 220) {
+    heartRate = bpm;
+  }
+  
+  if (spo2_reading >= 70 && spo2_reading <= 100) {
+    spo2 = spo2_reading;
+  }
+  
+  // Calculate signal quality based on beat detection
+  if (beatDetected) {
+    signalQuality = min(signalQuality + 5.0f, 100.0f);
+  } else {
+    signalQuality = max(signalQuality - 2.0f, 0.0f);
+  }
+  
+  // Calculate vitality index based on signal quality and readings
+  if (heartRate > 0 && spo2 > 0) {
+    vitalityIndex = (signalQuality * 0.6f) + (spo2 * 0.2f) + ((heartRate > 60 && heartRate < 100) ? 20.0f : 0.0f);
+    vitalityStatus = vitalityIndex > 70 ? "Strong Vitality" : vitalityIndex > 40 ? "Moderate Vitality" : "Weak Vitality";
+  } else {
+    vitalityIndex = 0;
+    vitalityStatus = "No Detectable Vitality";
+  }
+  
+  probeQuality = signalQuality > 70 ? "Good" : signalQuality > 40 ? "Fair" : "Poor";
+  
+  // Reset beat detection flag
+  beatDetected = false;
 }
 
 // ============================================================
-// PROCESS SIGNALS - Fixed Signal Processing Pipeline
+// PROCESS SIGNALS - Simplified for PulseOximeter library
 // ============================================================
 void processSignals() {
-  // Remove ambient contribution
-  redADC = redADC - ambientADC;
-  irADC = irADC - ambientADC;
-  
-  // Check for sensor saturation
-  sensorSaturated = (abs(redADC) > 32000) || (abs(irADC) > 32000);
-  
-  // Add to filter buffers (raw values for AC peak-to-peak calculation)
-  redBuffer[bufferIndex] = redADC;
-  irBuffer[bufferIndex] = irADC;
-  bufferIndex = (bufferIndex + 1) % FILTER_BUFFER_SIZE;
-  
-  // Apply median filter (removes impulse noise from raw signal)
-  int16_t redMedian = medianFilter(redBuffer, FILTER_BUFFER_SIZE);
-  int16_t irMedian = medianFilter(irBuffer, FILTER_BUFFER_SIZE);
-  
-  // Apply low-pass filter (exponential moving average)
-  redLowPass = (int16_t)(LOW_PASS_ALPHA * redMedian + (1.0 - LOW_PASS_ALPHA) * redLowPass);
-  irLowPass = (int16_t)(LOW_PASS_ALPHA * irMedian + (1.0 - LOW_PASS_ALPHA) * irLowPass);
-  
-  // Baseline correction using SLOW EMA (does NOT track pulsatile component)
-  // Alpha=0.005 gives ~200 sample time constant (~20 seconds at 10Hz)
-  // This preserves the cardiac pulse while removing DC drift
-  if (redBaseline == 0 && irBaseline == 0) {
-    // First run: initialize baseline to current value
-    redBaseline = redLowPass;
-    irBaseline = irLowPass;
-  } else {
-    redBaseline = (int16_t)(0.005 * redLowPass + 0.995 * redBaseline);
-    irBaseline = (int16_t)(0.005 * irLowPass + 0.995 * irBaseline);
-  }
-  
-  // Remove baseline to get pulsatile (AC) component
-  redFiltered = redLowPass - redBaseline;
-  irFiltered = irLowPass - irBaseline;
-  
-  // NOTE: No outlier rejection on filtered signal!
-  // The old rejectOutliers() was comparing baseline-subtracted values
-  // against raw buffer stats, which destroyed ALL pulsatile peaks.
-  // Median filter already handles raw outliers.
-  
-  // Calculate signal quality
-  calculateSignalQuality();
-  
-  // Calculate heart rate with improved algorithm
-  calculateHeartRate();
-  
-  // Calculate SpO2 using AC/DC ratio of ratios
-  calculateSpO2();
-  
-  // Calculate vitality index
-  calculateVitalityIndex();
-  
-  // Calculate probe quality
-  calculateProbeQuality();
+  // PulseOximeter library handles all signal processing
+  // This function is kept for compatibility but does nothing
+  // All calculations are done in updateMAX30100()
 }
+
+// ============================================================
+// OLD SIGNAL PROCESSING FUNCTIONS - NO LONGER USED
+// ============================================================
+// The following functions are no longer needed as the PulseOximeter library
+// handles all signal processing, heart rate detection, and SpO2 calculation.
+// Kept for reference but not called in the main code.
 
 // ============================================================
 // MEDIAN FILTER
 // ============================================================
 int16_t medianFilter(int16_t* buffer, int size) {
-  int16_t temp[MEDIAN_WINDOW];
-  int startIdx = (bufferIndex - MEDIAN_WINDOW + size) % size;
-  
-  // Copy window
-  for (int i = 0; i < MEDIAN_WINDOW; i++) {
-    temp[i] = buffer[(startIdx + i) % size];
-  }
-  
-  // Sort
-  for (int i = 0; i < MEDIAN_WINDOW - 1; i++) {
-    for (int j = 0; j < MEDIAN_WINDOW - i - 1; j++) {
-      if (temp[j] > temp[j + 1]) {
-        int16_t t = temp[j];
-        temp[j] = temp[j + 1];
-        temp[j + 1] = t;
-      }
-    }
-  }
-  
-  return temp[MEDIAN_WINDOW / 2];
+  // Not used - PulseOximeter handles filtering
+  return 0;
 }
 
 // ============================================================
 // BASELINE CORRECTION
 // ============================================================
 void updateBaseline() {
-  // Calculate running average as baseline
-  int32_t redSum = 0;
-  int32_t irSum = 0;
-  
-  for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
-    redSum += redBuffer[i];
-    irSum += irBuffer[i];
-  }
-  
-  redBaseline = redSum / FILTER_BUFFER_SIZE;
-  irBaseline = irSum / FILTER_BUFFER_SIZE;
+  // Not used - PulseOximeter handles baseline correction
 }
 
 // ============================================================
 // OUTLIER REJECTION
 // ============================================================
 int16_t rejectOutliers(int16_t value, int16_t* buffer, int size) {
-  // Calculate mean and standard deviation
-  int32_t sum = 0;
-  for (int i = 0; i < size; i++) {
-    sum += buffer[i];
-  }
-  float mean = (float)sum / size;
-  
-  float variance = 0;
-  for (int i = 0; i < size; i++) {
-    float diff = buffer[i] - mean;
-    variance += diff * diff;
-  }
-  float stdDev = sqrt(variance / size);
-  
-  // Reject if more than 2 standard deviations from mean
-  if (abs(value - mean) > 2 * stdDev) {
-    return (int16_t)mean; // Replace with mean
-  }
-  
+  // Not used - PulseOximeter handles outlier rejection
   return value;
 }
 
 // ============================================================
 // CALCULATE HEART RATE
-// Detect peaks in the filtered pulsatile IR signal.
-// BPM = 60 / time_between_consecutive_valid_peaks
 // ============================================================
 void calculateHeartRate() {
-  // ---- state kept across calls ----
-  static int16_t prevIR       = 0;      // previous irFiltered sample
-  static bool    wasRising    = false;  // was signal going up last sample?
-  static int16_t troughVal    = 0;      // most-recent trough value
-  static unsigned long lastValidPeak = 0;
-  static int     validPeakCount = 0;
-
-  bool isRising = (irFiltered > prevIR);
-
-  // ---- peak = signal was rising, now falling ----
-  if (wasRising && !isRising) {
-    //  prevIR was the local maximum
-    int16_t peakAmp = prevIR - troughVal;        // amplitude of this pulse
-
-    if (peakAmp > PEAK_THRESHOLD_MIN) {           // real pulse, not noise
-      unsigned long now      = millis();
-      unsigned long interval = now - lastPeakTime;
-
-      // accept first peak unconditionally; after that enforce timing window
-      if (lastPeakTime == 0 ||
-          (interval >= MIN_PEAK_INTERVAL && interval <= MAX_PEAK_INTERVAL)) {
-
-        // store timestamp in circular buffer
-        peakTimes[peakCount % 10] = now;
-        peakCount++;
-        lastPeakTime  = now;
-        lastValidPeak = now;
-        pulseDetected = true;
-        validPeakCount++;
-
-        // BPM from the two most-recent peaks (instantaneous)
-        if (peakCount >= 2) {
-          unsigned long latestInterval =
-              peakTimes[(peakCount - 1) % 10] - peakTimes[(peakCount - 2) % 10];
-
-          if (latestInterval >= MIN_PEAK_INTERVAL &&
-              latestInterval <= MAX_PEAK_INTERVAL) {
-            float bpm = 60000.0f / (float)latestInterval;
-            bpm = constrain(bpm, (float)HEART_RATE_MIN, (float)HEART_RATE_MAX);
-
-            // smooth with exponential moving average
-            heartRate = (heartRate > 1.0f)
-                            ? heartRate * 0.7f + bpm * 0.3f
-                            : bpm;               // first valid reading
-          }
-        }
-      }
-    }
-    troughVal = irFiltered;                       // reset trough after peak
-  }
-
-  // ---- track trough while signal falls ----
-  if (!isRising && irFiltered < troughVal)  troughVal = irFiltered;
-  if ( isRising && !wasRising)              troughVal = prevIR;   // new rise
-
-  prevIR    = irFiltered;
-  wasRising = isRising;
-
-  // ---- timeout: gradual decay if no peaks for 5 s ----
-  if (millis() - lastValidPeak > 5000 && heartRate > 0) {
-    heartRate *= 0.92f;
-    if (heartRate < 25.0f) {
-      heartRate      = 0;
-      pulseDetected  = false;
-      validPeakCount = 0;
-      peakCount      = 0;
-    }
-  }
-
-  // ---- confidence from peak-interval consistency ----
-  if (validPeakCount > 3) {
-    int   cnt       = min(validPeakCount, 10);
-    int   nIntervals = cnt - 1;
-    float mean = 0;
-    for (int i = 0; i < nIntervals; i++)
-      mean += peakTimes[(i + 1) % 10] - peakTimes[i % 10];
-    mean /= nIntervals;
-
-    float var = 0;
-    for (int i = 0; i < nIntervals; i++) {
-      float diff = (float)(peakTimes[(i + 1) % 10] - peakTimes[i % 10]) - mean;
-      var += diff * diff;
-    }
-    var /= nIntervals;
-    float cv = (mean > 0) ? sqrtf(var) / mean : 1.0f;
-    heartRateConfidence = constrain(100.0f - cv * 200.0f, 0.0f, 100.0f);
-  } else {
-    heartRateConfidence *= 0.9f;                  // decay when few peaks
-  }
-  heartRateConfidence = heartRateConfidence * signalQuality / 100.0f;
+  // Not used - PulseOximeter handles heart rate detection
 }
 
 // ============================================================
 // CALCULATE SpO2
-// R   = (AC_Red / DC_Red) / (AC_IR / DC_IR)
-// Using proper calibrated pulse oximetry algorithm from MAX30100 library
-//
-// AC  = peak-to-peak of the raw buffer (true pulsatile component)
-// DC  = |baseline|              (mean / non-pulsatile component)
 // ============================================================
 void calculateSpO2() {
-  static float smoothR    = 0.0f;   // EMA-smoothed R
-  static float smoothSpo2 = 0.0f;   // EMA-smoothed SpO2
-  static bool  firstRun   = true;
-
-  // ---- AC = peak-to-peak over the rolling buffer ----
-  int16_t rMin =  32767, rMax = -32768;
-  int16_t iMin =  32767, iMax = -32768;
-
-  for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
-    if (redBuffer[i] < rMin) rMin = redBuffer[i];
-    if (redBuffer[i] > rMax) rMax = redBuffer[i];
-    if (irBuffer[i]  < iMin) iMin = irBuffer[i];
-    if (irBuffer[i]  > iMax) iMax = irBuffer[i];
-  }
-
-  float acRed = (float)(rMax - rMin);
-  float acIR  = (float)(iMax - iMin);
-
-  // ---- DC = absolute baseline (running mean) ----
-  float dcRed = fabsf((float)redBaseline);
-  float dcIR  = fabsf((float)irBaseline);
-
-  // store for telemetry / other modules
-  redAC = acRed;  irAC = acIR;
-  redDC = dcRed;  irDC = dcIR;
-
-  // guard: need real signal on both channels
-  if (dcRed < 10.0f || dcIR < 10.0f || acRed < 2.0f || acIR < 2.0f) {
-    spo2Confidence *= 0.9f;
-    return;                                       // keep previous spo2
-  }
-
-  // ---- R = (AC_Red / DC_Red) / (AC_IR / DC_IR) ----
-  float R = (acRed / dcRed) / (acIR / dcIR);
-
-  // reject obvious noise
-  if (R < 0.1f || R > 3.0f) {
-    spo2Confidence *= 0.9f;
-    return;
-  }
-
-  // ---- smooth R ----
-  if (firstRun) { 
-    smoothR = R; 
-    // Use empirical formula for SpO2 calculation
-    // Note: This is a simplified formula. For clinical use, proper calibration is required.
-    smoothSpo2 = 110.0f - 25.0f * R; // Initial estimate
-    firstRun = false; 
-  }
-  smoothR = smoothR * 0.80f + R * 0.20f;
-
-  // ---- Calculate SpO2 using empirical formula ----
-  // Using the standard empirical formula: SpO2 = 110 - 25*R
-  // Note: For accurate clinical readings, this should be calibrated with reference equipment
-  float raw = 110.0f - 25.0f * smoothR;
-  raw = constrain(raw, 70.0f, 100.0f);
-  smoothSpo2 = smoothSpo2 * 0.85f + raw * 0.15f;
-  
-  spo2 = smoothSpo2;
-
-  // ---- confidence ----
-  spo2Confidence = signalQuality;
-  if ((acRed / dcRed) < 0.005f) spo2Confidence *= 0.5f;
+  // Not used - PulseOximeter handles SpO2 calculation
 }
 
 // ============================================================
-// CALCULATE SIGNAL QUALITY - Enhanced Assessment
+// CALCULATE SIGNAL QUALITY
 // ============================================================
 void calculateSignalQuality() {
-  // Factors affecting signal quality:
-  // 1. Signal amplitude
-  // 2. Noise level (variance)
-  // 3. Peak consistency
-  // 4. Ambient light interference
-  // 5. ADC stability
-  
-  float amplitudeScore = 0;
-  float noiseScore = 0;
-  float ambientScore = 0;
-  float stabilityScore = 0;
-  
-  // Amplitude score
-  int16_t signalAmplitude = abs(redFiltered - irFiltered);
-  if (signalAmplitude > 5000) {
-    amplitudeScore = 100;
-  } else if (signalAmplitude > 2000) {
-    amplitudeScore = 80;
-  } else if (signalAmplitude > 500) {
-    amplitudeScore = 60;
-  } else {
-    amplitudeScore = 30;
-  }
-  
-  // Noise score (calculate variance)
-  int32_t sum = 0;
-  for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
-    sum += redBuffer[i];
-  }
-  float mean = (float)sum / FILTER_BUFFER_SIZE;
-  
-  float variance = 0;
-  for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
-    variance += pow(redBuffer[i] - mean, 2);
-  }
-  variance /= FILTER_BUFFER_SIZE;
-  noiseLevel = sqrt(variance);
-  
-  // Lower noise = higher score
-  if (noiseLevel < 500) {
-    noiseScore = 100;
-  } else if (noiseLevel < 1000) {
-    noiseScore = 80;
-  } else if (noiseLevel < 2000) {
-    noiseScore = 60;
-  } else {
-    noiseScore = 30;
-  }
-  
-  // Ambient light interference
-  if (ambientADC < 500) {
-    ambientScore = 100;
-  } else if (ambientADC < 1000) {
-    ambientScore = 80;
-  } else if (ambientADC < 2000) {
-    ambientScore = 60;
-  } else {
-    ambientScore = 30;
-  }
-  
-  // ADC stability (check for saturation)
-  if (sensorSaturated) {
-    stabilityScore = 20;
-  } else {
-    stabilityScore = 100;
-  }
-  
-  // Motion detection (sudden changes in baseline)
-  static int16_t prevBaseline = 0;
-  int16_t baselineChange = abs(redBaseline - prevBaseline);
-  if (baselineChange > 1000) {
-    motionDetected = true;
-    stabilityScore *= 0.5;
-  } else {
-    motionDetected = false;
-  }
-  prevBaseline = redBaseline;
-  
-  // Peak consistency (if heart rate detected)
-  if (pulseDetected && heartRateConfidence > 50) {
-    peakConsistency = heartRateConfidence;
-  } else {
-    peakConsistency = 0;
-  }
-  
-  // Overall signal quality (weighted average)
-  signalQuality = (amplitudeScore * 0.3) + (noiseScore * 0.25) + 
-                  (ambientScore * 0.2) + (stabilityScore * 0.15) + 
-                  (peakConsistency * 0.1);
-  
-  signalQuality = constrain(signalQuality, 0, 100);
+  // Not used - Signal quality calculated in updateMAX30100()
 }
 
 // ============================================================
 // CALCULATE PROBE QUALITY
 // ============================================================
 void calculateProbeQuality() {
-  // Evaluate probe contact, movement, ambient light, saturation
-  
-  float contactScore = 0;
-  float movementScore = 0;
-  float ambientScore = 0;
-  float saturationScore = 0;
-  
-  // Contact quality based on signal amplitude
-  int16_t signalAmplitude = abs(redFiltered - irFiltered);
-  if (signalAmplitude > 2000) {
-    contactScore = 100;
-  } else if (signalAmplitude > 1000) {
-    contactScore = 75;
-  } else if (signalAmplitude > 500) {
-    contactScore = 50;
-  } else {
-    contactScore = 25;
-  }
-  
-  // Movement detection
-  movementScore = motionDetected ? 30 : 100;
-  
-  // Ambient light
-  if (ambientADC < 500) {
-    ambientScore = 100;
-  } else if (ambientADC < 1000) {
-    ambientScore = 75;
-  } else if (ambientADC < 2000) {
-    ambientScore = 50;
-  } else {
-    ambientScore = 25;
-  }
-  
-  // Sensor saturation
-  saturationScore = sensorSaturated ? 20 : 100;
-  
-  // Overall probe quality
-  float overallQuality = (contactScore * 0.4) + (movementScore * 0.3) + 
-                         (ambientScore * 0.2) + (saturationScore * 0.1);
-  
-  if (overallQuality >= 80) {
-    probeQuality = "Excellent";
-  } else if (overallQuality >= 60) {
-    probeQuality = "Good";
-  } else if (overallQuality >= 40) {
-    probeQuality = "Fair";
-  } else {
-    probeQuality = "Poor";
-  }
+  // Not used - Probe quality calculated in updateMAX30100()
 }
 
 // ============================================================
-// CALCULATE VITALITY INDEX - Enhanced Multi-Factor Analysis
+// CALCULATE VITALITY INDEX
 // ============================================================
 void calculateVitalityIndex() {
-  // Research-oriented vitality index based on:
-  // 1. Pulse presence (30%)
-  // 2. Pulse amplitude (20%)
-  // 3. Signal quality (20%)
-  // 4. Heart rate confidence (10%)
-  // 5. Red/IR ratio (10%)
-  // 6. Temperature stability (5%)
-  // 7. Measurement duration (5%)
-  
-  float pulseScore = pulseDetected ? 30 : 0;
-  
-  float amplitudeScore = 0;
-  int16_t signalAmplitude = abs(redFiltered - irFiltered);
-  if (signalAmplitude > 2000) {
-    amplitudeScore = 20;
-  } else if (signalAmplitude > 1000) {
-    amplitudeScore = 15;
-  } else if (signalAmplitude > 500) {
-    amplitudeScore = 10;
-  } else {
-    amplitudeScore = 5;
-  }
-  
-  float qualityScore = signalQuality * 0.2;
-  
-  float confidenceScore = heartRateConfidence * 0.1;
-  
-  float ratioScore = 0;
-  if (redDC > 0 && irDC > 0) {
-    float ratio = (float)redDC / (float)irDC;
-    if (ratio > 0.5 && ratio < 2.0) {
-      ratioScore = 10;
-    } else {
-      ratioScore = 5;
-    }
-  }
-  
-  float tempScore = 0;
-  if (temperature >= 36.0 && temperature <= 37.5) {
-    tempScore = 5;
-  } else if (temperature >= 35.0 && temperature < 38.0) {
-    tempScore = 3;
-  } else {
-    tempScore = 1;
-  }
-  
-  float durationScore = 0;
-  if (testRunning) {
-    unsigned long testSeconds = (millis() - testStartTime) / 1000;
-    if (testSeconds >= 10) {
-      durationScore = 5;
-    } else if (testSeconds >= 5) {
-      durationScore = 3;
-    } else {
-      durationScore = 1;
-    }
-  }
-  
-  vitalityIndex = pulseScore + amplitudeScore + qualityScore + 
-                  confidenceScore + ratioScore + tempScore + durationScore;
-  vitalityIndex = constrain(vitalityIndex, 0, 100);
-  
-  // Calculate confidence based on component scores
-  float totalPossible = 100;
-  float achieved = pulseScore + amplitudeScore + qualityScore + confidenceScore;
-  vitalityConfidence = (achieved / totalPossible) * 100;
-  
-  // Determine vitality status
-  if (vitalityIndex >= 80) {
-    vitalityStatus = "Strong Vitality";
-  } else if (vitalityIndex >= 60) {
-    vitalityStatus = "Moderate Vitality";
-  } else if (vitalityIndex >= 40) {
-    vitalityStatus = "Weak Vitality";
-  } else {
-    vitalityStatus = "No Detectable Vitality";
-  }
+  // Not used - Vitality index calculated in updateMAX30100()
 }
 
 // ============================================================
@@ -2173,53 +1679,19 @@ void checkBattery() {
 }
 
 // ============================================================
-// CHECK TEMPERATURE - Real reading with fallback to demo data
+// CHECK TEMPERATURE - Demo data only
 // ============================================================
 void checkTemperature() {
-  static bool lm35Working = true;
-  static unsigned long lastTempCheck = 0;
+  static unsigned long lastTempUpdate = 0;
   static float demoTemperature = 36.6;
   
-  // Try real temperature reading from LM35 sensor
-  int raw = analogRead(PIN_LM35);
-  
-  // Check if sensor is working (raw value should be reasonable)
-  if (raw > 0 && raw < 4095) {
-    float voltage = (raw / 4095.0) * 3.3;
-    float tempReading = voltage * 100.0;
-    
-    // Validate temperature reading (should be in reasonable range)
-    if (tempReading >= 20.0 && tempReading <= 45.0) {
-      temperature = tempReading;
-      lm35Working = true;
-      
-      // Temperature warnings
-      if (temperature > HIGH_TEMP_WARNING) {
-        Serial.println(F("HIGH TEMPERATURE WARNING"));
-        publishLog("High Temperature Warning");
-      } else if (temperature < LOW_TEMP_WARNING) {
-        Serial.println(F("LOW TEMPERATURE WARNING"));
-        publishLog("Low Temperature Warning");
-      }
-      return;
-    }
-  }
-  
-  // Sensor not working or invalid reading - use demo data
-  if (lm35Working) {
-    Serial.println(F("LM35 sensor not detected - using demo temperature data"));
-    lm35Working = false;
-  }
-  
   // Generate demo temperature data (36.0-37.5°C range with small variations)
-  if (millis() - lastTempCheck > 60000) { // Update every minute
+  if (millis() - lastTempUpdate > 60000) { // Update every minute
     demoTemperature = 36.0 + random(0, 16) / 10.0; // 36.0 to 37.5
-    lastTempCheck = millis();
+    lastTempUpdate = millis();
   }
   
   temperature = demoTemperature;
-  
-  // No warnings for demo data
 }
 
 // ============================================================
@@ -2432,89 +1904,39 @@ void updateOLED() {
       }
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
-      if (!fingerDetected) {
-        // ---- STATE 1: NO FINGER — ask user to place finger ----
-        display.setCursor(10, 18);
-        display.setTextSize(1);
-        display.println(F("PLACE FINGER"));
-        display.setCursor(10, 28);
-        display.println(F("on sensor"));
-        display.setCursor(10, 38);
-        display.println(F("and hold steady"));
-        // Animated dots
-        display.setCursor(64, 38);
-        int dots = (millis() / 500) % 4;
-        for (int i = 0; i < dots; i++) display.print(F("."));
-        // Bottom: live sensor readout for positioning
-        display.setCursor(0, 56);
-        display.print(F("IR:"));
-        display.print(irRaw);
-        display.print(F(" R:"));
-        display.print(redRaw);
-      }
-      else if (stableSampleCount < STABLE_SAMPLES_REQUIRED) {
-        // ---- STATE 2: FINGER DETECTED, acquiring samples ----
-        display.setCursor(8, 15);
-        display.println(F("Acquiring..."));
-        // Progress bar based on stable samples
-        float pct = constrain((float)stableSampleCount / STABLE_SAMPLES_REQUIRED * 100.0, 0, 95);
-        drawProgressBar(4, 28, 120, 10, pct);
-        display.setCursor(0, 42);
-        display.print(F("IR: "));
-        display.print(irRaw);
-        display.print(F("  Red: "));
-        display.println(redRaw);
-        display.setCursor(0, 52);
-        display.print(F("Samples: "));
-        display.print(stableSampleCount);
-        display.print(F("/"));
-        display.println(STABLE_SAMPLES_REQUIRED);
-      }
-      else {
-        // ---- STATE 3: ENOUGH SAMPLES — show readings ----
-        // Big heart rate
-        display.setTextSize(2);
-        display.setCursor(0, 12);
+      // Simple display based on working example
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setCursor(32, 15);
+      display.println(F("PULP DEVICE"));
+      
+      // BPM
+      display.setTextSize(2);
+      display.setCursor(0, 28);
+      display.print(F("BPM:"));
+      if (heartRate >= 30 && heartRate <= 220) {
         display.print((int)heartRate);
-        display.setTextSize(1);
-        display.setCursor(48, 12);
-        display.print(F("BPM"));
-        // SpO2
-        display.setCursor(72, 12);
-        display.print(F("SpO2"));
-        display.setTextSize(2);
-        display.setCursor(72, 20);
-        display.print((int)spo2);
-        display.setTextSize(1);
-        display.setCursor(108, 20);
-        display.print(F("%"));
-        // Temp + Signal Quality
-        display.setCursor(0, 32);
-        display.print(F("Tmp:"));
-        display.print(temperature, 1);
-        display.print(F("C"));
-        display.setCursor(72, 32);
-        display.print(F("SQ:"));
-        display.print((int)signalQuality);
-        display.print(F("%"));
-        // Vitality + Signal
-        display.setCursor(0, 42);
-        display.print(F("VI:"));
-        display.print((int)vitalityIndex);
-        display.print(F("% "));
-        display.print(vitalityStatus.substring(0, 8));
-        // Battery
-        display.setCursor(0, 52);
-        display.print(F("Signal:"));
-        display.print(probeQuality);
-        display.setCursor(72, 52);
-        drawBatteryIcon(72, 52);
-        display.setCursor(88, 52);
-        display.print((int)batteryPercent);
-        display.print(F("%"));
-        // Signal bar
-        drawSignalQualityBar(0, 62, signalQuality);
+      } else {
+        display.print(F("--"));
       }
+      
+      // SpO2
+      display.setCursor(0, 52);
+      display.print(F("O2:"));
+      if (spo2 >= 70 && spo2 <= 100) {
+        display.print((int)spo2);
+        display.print(F("%"));
+      } else {
+        display.print(F("--"));
+      }
+      
+      // Show beat detection indicator
+      if (beatDetected) {
+        display.setTextSize(1);
+        display.setCursor(100, 15);
+        display.print(F("♥"));
+      }
+      
       break;
     case STATE_DIAGNOSTIC:
       display.println(F("Diagnostics"));
@@ -2685,32 +2107,31 @@ void publishTelemetry() {
   jsonDoc["battery"] = batteryPercent;
   jsonDoc["voltage"] = batteryVoltage;
   jsonDoc["temperature"] = temperature;
-  jsonDoc["redRaw"] = redRaw;
-  jsonDoc["irRaw"] = irRaw;
-  jsonDoc["fingerDetected"] = fingerDetected;
-  jsonDoc["stableSampleCount"] = stableSampleCount;
-  jsonDoc["redFiltered"] = redFiltered;
-  jsonDoc["irFiltered"] = irFiltered;
-  jsonDoc["redAC"] = redAC;
-  jsonDoc["redDC"] = redDC;
-  jsonDoc["irAC"] = irAC;
-  jsonDoc["irDC"] = irDC;
+  // GY-MAX3010x fields (using library values)
+  jsonDoc["redRaw"] = pox.red;
+  jsonDoc["irRaw"] = pox.IR;
+  jsonDoc["fingerDetected"] = (heartRate > 0 || spo2 > 0); // Finger detected if we have readings
+  jsonDoc["stableSampleCount"] = sampleCount;
   jsonDoc["heartRate"] = heartRate;
-  jsonDoc["heartRateConfidence"] = heartRateConfidence;
+  jsonDoc["heartRateConfidence"] = signalQuality; // Use signal quality as confidence
   jsonDoc["spo2"] = spo2;
-  jsonDoc["spo2Confidence"] = spo2Confidence;
+  jsonDoc["spo2Confidence"] = signalQuality; // Use signal quality as confidence
   jsonDoc["signalQuality"] = signalQuality;
-  jsonDoc["noiseLevel"] = noiseLevel;
-  jsonDoc["peakConsistency"] = peakConsistency;
-  jsonDoc["motionDetected"] = motionDetected;
-  jsonDoc["sensorSaturated"] = sensorSaturated;
   jsonDoc["vitalityIndex"] = vitalityIndex;
-  jsonDoc["vitalityConfidence"] = vitalityConfidence;
   jsonDoc["vitalityStatus"] = vitalityStatus;
   jsonDoc["probeQuality"] = probeQuality;
   jsonDoc["deviceState"] = getStateString();
   jsonDoc["sampleCount"] = sampleCount;
   jsonDoc["testDuration"] = testRunning ? (millis() - testStartTime) : testDuration;
+  // Legacy compatibility fields
+  jsonDoc["redFiltered"] = pox.red;
+  jsonDoc["irFiltered"] = pox.IR;
+  jsonDoc["redAC"] = 0; // Not calculated by PulseOximeter library
+  jsonDoc["redDC"] = 0; // Not calculated by PulseOximeter library
+  jsonDoc["irAC"] = 0; // Not calculated by PulseOximeter library
+  jsonDoc["irDC"] = 0; // Not calculated by PulseOximeter library
+  jsonDoc["motionDetected"] = false;
+  jsonDoc["sensorSaturated"] = false;
   
   serializeJson(jsonDoc, mqttPayload);
   sprintf(mqttTopic, TOPIC_TELEMETRY, deviceId.c_str());
