@@ -194,7 +194,7 @@ function DashboardPage() {
               <SensorCard label="Battery" value={latest?.battery ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="battery" hint="Device battery" />
             </div>
 
-            <div className="flex-1 min-h-0">
+            <div className="h-64 min-h-0">
               <LiveWaveform samples={displaySamples} />
             </div>
 
