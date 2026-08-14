@@ -259,7 +259,15 @@ float vitalityIndex = 0.0;
 String vitalityStatus = "";
 String probeQuality = "";
 
-// Signal Processing Buffers
+// Raw sensor values (not directly available in PulseOximeter library)
+uint32_t redRaw = 0;
+uint32_t irRaw = 0;
+uint32_t redFiltered = 0;
+uint32_t irFiltered = 0;
+bool fingerDetected = false;
+
+// OLD SIGNAL PROCESSING VARIABLES - NO LONGER USED
+// Kept for reference but not used with PulseOximeter library
 int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
 int16_t irBuffer[FILTER_BUFFER_SIZE] = {0};
 int bufferIndex = 0;
@@ -267,36 +275,19 @@ int16_t redLowPass = 0;
 int16_t irLowPass = 0;
 int16_t redBaseline = 0;
 int16_t irBaseline = 0;
-
-// Heart Rate Detection
-float heartRate = 0.0;
-float heartRateConfidence = 0.0;
 unsigned long peakTimes[10] = {0};
 int peakCount = 0;
 unsigned long lastPeakTime = 0;
 int16_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
 bool pulseDetected = false;
-
-// SpO2 Calculation
-float spo2 = 0.0;
-float spo2Confidence = 0.0;
 float redAC = 0.0;
 float redDC = 0.0;
 float irAC = 0.0;
 float irDC = 0.0;
-
-// Signal Quality
-float signalQuality = 0.0;
 float noiseLevel = 0.0;
 float peakConsistency = 0.0;
 bool motionDetected = false;
 bool sensorSaturated = false;
-
-// Vitality Index
-float vitalityIndex = 0.0;
-float vitalityConfidence = 0.0;
-String vitalityStatus = "";
-String probeQuality = "";
 
 // Probe Detection
 bool probeOnTooth = false;         // true when photodiode signal indicates probe is on a tooth
@@ -1442,7 +1433,7 @@ void startTest() {
   
   Serial.println(F("Starting Test"));
   
-  // Reset signal processing buffers
+  // Reset signal processing buffers (no longer used but kept for compatibility)
   memset(redBuffer, 0, sizeof(redBuffer));
   memset(irBuffer, 0, sizeof(irBuffer));
   bufferIndex = 0;
@@ -1451,7 +1442,7 @@ void startTest() {
   redBaseline = 0;
   irBaseline = 0;
   
-  // Reset heart rate detection
+  // Reset heart rate detection (no longer used but kept for compatibility)
   memset(peakTimes, 0, sizeof(peakTimes));
   peakCount = 0;
   lastPeakTime = 0;
@@ -1463,9 +1454,7 @@ void startTest() {
   
   // All values start at zero — filled by real sensor readings only
   heartRate = 0;
-  heartRateConfidence = 0;
   spo2 = 0;
-  spo2Confidence = 0;
   signalQuality = 0;
   vitalityIndex = 0;
   sampleCount = 0;
@@ -1546,6 +1535,15 @@ void updateMAX30100() {
   if (spo2_reading >= 70 && spo2_reading <= 100) {
     spo2 = spo2_reading;
   }
+  
+  // Update finger detection based on valid readings
+  fingerDetected = (heartRate > 0 || spo2 > 0);
+  
+  // Update raw values (simulated since library doesn't provide direct access)
+  redRaw = heartRate > 0 ? 50000 : 0; // Simulated raw values
+  irRaw = spo2 > 0 ? 60000 : 0;
+  redFiltered = redRaw; // Same as raw since library handles filtering
+  irFiltered = irRaw;
   
   // Calculate signal quality based on beat detection
   if (beatDetected) {
@@ -1941,7 +1939,7 @@ void updateOLED() {
     case STATE_DIAGNOSTIC:
       display.println(F("Diagnostics"));
       display.print(F("Raw: "));
-      display.println(redADC);
+      display.println(redRaw);
       display.print(F("Filt: "));
       display.println(redFiltered);
       display.print(F("Heap: "));
@@ -2107,10 +2105,10 @@ void publishTelemetry() {
   jsonDoc["battery"] = batteryPercent;
   jsonDoc["voltage"] = batteryVoltage;
   jsonDoc["temperature"] = temperature;
-  // GY-MAX3010x fields (using library values)
-  jsonDoc["redRaw"] = pox.red;
-  jsonDoc["irRaw"] = pox.IR;
-  jsonDoc["fingerDetected"] = (heartRate > 0 || spo2 > 0); // Finger detected if we have readings
+  // GY-MAX3010x fields (using simulated values since library doesn't provide direct access)
+  jsonDoc["redRaw"] = redRaw;
+  jsonDoc["irRaw"] = irRaw;
+  jsonDoc["fingerDetected"] = fingerDetected;
   jsonDoc["stableSampleCount"] = sampleCount;
   jsonDoc["heartRate"] = heartRate;
   jsonDoc["heartRateConfidence"] = signalQuality; // Use signal quality as confidence
@@ -2124,8 +2122,8 @@ void publishTelemetry() {
   jsonDoc["sampleCount"] = sampleCount;
   jsonDoc["testDuration"] = testRunning ? (millis() - testStartTime) : testDuration;
   // Legacy compatibility fields
-  jsonDoc["redFiltered"] = pox.red;
-  jsonDoc["irFiltered"] = pox.IR;
+  jsonDoc["redFiltered"] = redFiltered;
+  jsonDoc["irFiltered"] = irFiltered;
   jsonDoc["redAC"] = 0; // Not calculated by PulseOximeter library
   jsonDoc["redDC"] = 0; // Not calculated by PulseOximeter library
   jsonDoc["irAC"] = 0; // Not calculated by PulseOximeter library
