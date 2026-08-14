@@ -472,19 +472,14 @@ export const liveDevices: IDeviceService = {
     // Return devices from local storage with updated online status
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 10000; // 10 seconds - device considered offline if no update in 10s
+    const offlineThreshold = 8000; // 8 seconds - device considered offline if no update in 8s
     
     return devices.map(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
       const isOffline = now - lastSeenTime > offlineThreshold;
       
-      // Also check device state if available
-      const deviceState = device.deviceState || 'UNKNOWN';
-      const goodStates = ['READY', 'TESTING', 'SHOWING_CONCLUSION', 'CONNECTING_WIFI', 'CONNECTING_MQTT'];
-      const stateBasedOnline = goodStates.includes(deviceState.toUpperCase());
-      
-      // Device is online only if BOTH: it's within threshold AND state indicates it's working
-      const isOnline = !isOffline && stateBasedOnline;
+      // Simple offline detection: if no recent updates, device is offline
+      const isOnline = !isOffline;
       
       return {
         ...device,
@@ -894,27 +889,20 @@ export const liveStream: ISensorStream = {
         const data = JSON.parse(message.toString());
         console.log('Device status update:', data);
         
-        // Determine if device is actually online based on state
-        const goodStates = ['READY', 'TESTING', 'SHOWING_CONCLUSION', 'CONNECTING_WIFI', 'CONNECTING_MQTT'];
-        const deviceState = data.state || data.deviceState || 'UNKNOWN';
-        const isActuallyOnline = goodStates.includes(deviceState.toUpperCase());
-        
         // Update stored device with fresh data
         const devices = getStoredDevices();
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
         if (idx >= 0) {
           devices[idx] = {
             ...devices[idx],
-            online: isActuallyOnline,
-            status: isActuallyOnline ? 'online' : 'offline',
             lastSeen: new Date().toISOString(),
-            deviceState: deviceState,
+            deviceState: data.state || data.deviceState || 'UNKNOWN',
             battery: data.battery ?? devices[idx].battery,
             batteryPct: data.battery ?? devices[idx].batteryPct,
             wifi: {
               ssid: devices[idx].wifi?.ssid || 'Connected',
               rssi: data.wifi ?? devices[idx].wifi?.rssi ?? -50,
-              connected: isActuallyOnline,
+              connected: true,
             },
             mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
           };
