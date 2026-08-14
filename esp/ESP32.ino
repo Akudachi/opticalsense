@@ -505,10 +505,8 @@ void loop() {
   // Always update sensor for finger detection and continuous readings
   updateMAX30100();
   
-  // Test Sampling - Only run when test is actually running
-  if (testRunning) {
-    runTestSampling();
-  }
+  // Test Sampling - Run to count samples during test and provide debug output
+  runTestSampling();
   
   // Diagnostic sampling
   if (diagnosticMode) {
@@ -1516,11 +1514,16 @@ void stopTest() {
 // RUN TEST SAMPLING
 // ============================================================
 void runTestSampling() {
-  // Debug output every 2 seconds
+  // Count samples during test - increment for each sensor update during test
+  // This counts actual samples collected from start to stop
+  if (testRunning) {
+    sampleCount++;
+  }
+  
+  // Debug output every 2 seconds (regardless of test status)
   static unsigned long lastDebug = 0;
   if (millis() - lastDebug >= 2000) {
     lastDebug = millis();
-    sampleCount++;
     
     Serial.println(F("------------------------------"));
     Serial.print(F("BPM: "));
@@ -1534,6 +1537,10 @@ void runTestSampling() {
     Serial.print(F("Vitality Index: "));
     Serial.print(vitalityIndex, 1);
     Serial.println(F("%"));
+    Serial.print(F("Sample Count: "));
+    Serial.println(sampleCount);
+    Serial.print(F("Test Running: "));
+    Serial.println(testRunning ? "YES" : "NO");
     Serial.println(F("------------------------------"));
   }
 }
