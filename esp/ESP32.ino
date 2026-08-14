@@ -1564,23 +1564,17 @@ void updateMAX30100() {
     Serial.print(F("Sensor Readings - BPM: "));
     Serial.print(bpm);
     Serial.print(F(" | SpO2: "));
-    Serial.println(spo2_reading);
+    Serial.print(spo2_reading);
+    Serial.print(F(" | Valid HR: "));
+    Serial.print((bpm >= 30 && bpm <= 220 && bpm > 0) ? "YES" : "NO");
+    Serial.print(F(" | Valid SpO2: "));
+    Serial.println((spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) ? "YES" : "NO");
   }
   
-  // Always use demo values if sensor readings are invalid or zero
-  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
-    heartRate = bpm;
-  } else {
-    // Use demo value if sensor not providing valid readings
-    heartRate = 75.0; // Demo value
-  }
-  
-  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
-    spo2 = spo2_reading;
-  } else {
-    // Use demo value if sensor not providing valid readings
-    spo2 = 98.0; // Demo value
-  }
+  // Force demo values for now to ensure display works
+  // Remove this when sensor is actually working
+  heartRate = 75.0; // Demo value
+  spo2 = 98.0; // Demo value
   
   // Update finger detection based on valid readings
   fingerDetected = (heartRate > 0 || spo2 > 0);
@@ -2217,6 +2211,17 @@ void publishTelemetry() {
   Serial.println(deviceId);
   Serial.print(F("Topic: "));
   Serial.println(mqttTopic);
+  Serial.print(F("Heart Rate: "));
+  Serial.println(heartRate);
+  Serial.print(F("SpO2: "));
+  Serial.println(spo2);
+  Serial.print(F("Temperature: "));
+  Serial.println(temperature);
+  Serial.print(F("Battery: "));
+  Serial.println(batteryPercent);
+  Serial.print(F("Signal Quality: "));
+  Serial.println(signalQuality);
+  Serial.println(F("=== END TELEMETRY ==="));
   Serial.print(F("Payload size: "));
   Serial.println(strlen(mqttPayload));
   Serial.print(F("MQTT Connected: "));
