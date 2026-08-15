@@ -1683,6 +1683,7 @@ void updateMAX30100() {
   static unsigned long lastBaselineChange = 0; // Track baseline stability
   static int32_t lastIrBaseline = 0;
   static bool baselineStable = false; // Track if baseline is stable
+  static unsigned long lastSmoothingDebug = 0; // Track smoothing debug timing
   
   uint16_t irValue, redValue;
   bool gotAnySample = false;
@@ -1723,8 +1724,13 @@ void updateMAX30100() {
         if (interval >= 200 && interval <= 2500) { // Relaxed MAX_PEAK_INTERVAL from 2000 to 2500
           float bpm = 60000.0f / interval;
           if (bpm >= 30 && bpm <= 200) { // Relaxed HR range from 40-180 to 30-200
-            // Exponential smoothing so a single noisy interval doesn't jump the reading
-            heartRate = (heartRate == 0) ? bpm : (heartRate * 0.7f + bpm * 0.3f);
+            // More aggressive smoothing for HR to reduce fluctuations
+            if (heartRate == 0) {
+              heartRate = bpm; // First reading
+            } else {
+              // 80/20 smoothing instead of 70/30 for more stability
+              heartRate = heartRate * 0.8f + bpm * 0.2f;
+            }
             pulseDetected = true;
             beatDetected = true;
             onBeatDetected();
@@ -1822,7 +1828,27 @@ void updateMAX30100() {
     // indicator for the dental signal, not an absolute blood-oxygen percentage.
     float R = (redAC / (float)redDC) / (irAC / (float)irDC);
     float spo2Estimate = 110.0f - 25.0f * R;
-    spo2 = constrain(spo2Estimate, 0.0f, 100.0f);
+    float newSpo2 = constrain(spo2Estimate, 0.0f, 100.0f);
+    
+    // Aggressive smoothing for SpO2 to reduce fluctuations
+    if (spo2 == 0) {
+      spo2 = newSpo2; // First reading
+    } else {
+      // 90/10 smoothing for SpO2 - much more aggressive than HR smoothing
+      float oldSpo2 = spo2;
+      spo2 = spo2 * 0.9f + newSpo2 * 0.1f;
+      // Debug smoothing occasionally
+      static unsigned long lastSmoothingDebug = 0;
+      if (millis() - lastSmoothingDebug >= 10000) {
+        lastSmoothingDebug = millis();
+        Serial.print(F("SpO2 smoothing: "));
+        Serial.print(oldSpo2);
+        Serial.print(F(" -> "));
+        Serial.print(newSpo2);
+        Serial.print(F(" -> "));
+        Serial.println(spo2);
+      }
+    }
     
     // Signal quality scales with AC amplitude (stronger pulsatile signal = higher quality)
     // Adjusted scale to work with smaller AC amplitudes
