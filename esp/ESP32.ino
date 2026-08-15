@@ -672,18 +672,13 @@ void initializeOLED() {
 // MAX30100 INITIALIZATION - GY-MAX3010x Sensor with PulseOximeter
 // ============================================================
 void initializeMAX30100() {
-  Serial.println(F("=== STEP 0: SENSOR INITIALIZATION ==="));
   Serial.println(F("Initializing GY-MAX3010x..."));
   
   // Initialize the PulseOximeter
   bool initSuccess = pox.begin();
   
-  Serial.print(F("MAX30100 Init Result: "));
-  Serial.println(initSuccess ? "SUCCESS" : "FAILED");
-  
   if (!initSuccess) {
-    Serial.println(F("MAX30100 initialization failed! Using demo values only."));
-    // Don't set error state, continue with demo values
+    Serial.println(F("ERROR: MAX30100 init failed! Using demo values only."));
     currentState = STATE_READY;
     return;
   }
@@ -692,10 +687,7 @@ void initializeMAX30100() {
   pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
   pox.setOnBeatDetectedCallback(onBeatDetected);
   
-  Serial.println(F("MAX30100 Initialized Successfully"));
-  Serial.println(F("IR LED = 7.6 mA"));
-  Serial.println(F("PLACE FINGER"));
-  Serial.println(F("======================================"));
+  Serial.println(F("MAX30100 OK - IR LED = 7.6 mA"));
 }
 
 // ============================================================
@@ -1566,70 +1558,44 @@ void updateMAX30100() {
   float bpm = pox.getHeartRate();
   float spo2_reading = pox.getSpO2();
   
-  // STEP 1: Debug raw sensor readings
+  // Debug sensor readings every 5 seconds
   static unsigned long lastSensorDebug = 0;
   if (millis() - lastSensorDebug >= 5000) {
     lastSensorDebug = millis();
-    Serial.println(F("=== STEP 1: RAW SENSOR READINGS ==="));
-    Serial.print(F("BPM: "));
+    Serial.print(F("Sensor: BPM="));
     Serial.print(bpm);
-    Serial.print(F(" | SpO2: "));
-    Serial.println(spo2_reading);
+    Serial.print(F(" SpO2="));
+    Serial.print(spo2_reading);
+    
+    bool bpmValid = (bpm >= 30 && bpm <= 220 && bpm > 0);
+    bool spo2Valid = (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0);
+    
+    Serial.print(F(" Valid: "));
+    Serial.print(bpmValid ? "HR_OK" : "HR_ERR");
+    Serial.print(F(" "));
+    Serial.println(spo2Valid ? "SPO2_OK" : "SPO2_ERR");
   }
   
-  // STEP 2: Validate sensor readings
-  bool bpmValid = (bpm >= 30 && bpm <= 220 && bpm > 0);
-  bool spo2Valid = (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0);
-  
-  if (millis() - lastSensorDebug >= 5000) {
-    Serial.println(F("=== STEP 2: VALIDATION CHECK ==="));
-    Serial.print(F("BPM Valid: "));
-    Serial.println(bpmValid ? "YES" : "NO");
-    Serial.print(F("SpO2 Valid: "));
-    Serial.println(spo2Valid ? "YES" : "NO");
-  }
-  
-  // STEP 3: Update heartRate
-  if (bpmValid) {
+  // Validate and update values
+  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
     heartRate = bpm;
   } else if (heartRate == 0) {
-    // If still 0 and no valid reading, use demo value
-    heartRate = 75.0;
-    if (millis() - lastSensorDebug >= 5000) {
-      Serial.println(F("=== STEP 3: USING DEMO HR ==="));
-      Serial.println(F("Heart Rate set to 75.0 (demo)"));
-    }
+    heartRate = 75.0; // Demo value
   }
   
-  // STEP 4: Update spo2
-  if (spo2Valid) {
+  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
     spo2 = spo2_reading;
   } else if (spo2 == 0) {
-    // If still 0 and no valid reading, use demo value
-    spo2 = 98.0;
-    if (millis() - lastSensorDebug >= 5000) {
-      Serial.println(F("=== STEP 4: USING DEMO SpO2 ==="));
-      Serial.println(F("SpO2 set to 98.0 (demo)"));
-    }
-  }
-  
-  // STEP 5: Debug final values
-  if (millis() - lastSensorDebug >= 5000) {
-    Serial.println(F("=== STEP 5: FINAL VALUES ==="));
-    Serial.print(F("heartRate: "));
-    Serial.println(heartRate);
-    Serial.print(F("spo2: "));
-    Serial.println(spo2);
-    Serial.println(F("=================================="));
+    spo2 = 98.0; // Demo value
   }
   
   // Update finger detection based on valid readings
   fingerDetected = (heartRate > 0 || spo2 > 0);
   
   // Update raw values (simulated since library doesn't provide direct access)
-  redRaw = heartRate > 0 ? 50000 : 0; // Simulated raw values
+  redRaw = heartRate > 0 ? 50000 : 0;
   irRaw = spo2 > 0 ? 60000 : 0;
-  redFiltered = redRaw; // Same as raw since library handles filtering
+  redFiltered = redRaw;
   irFiltered = irRaw;
   
   // Calculate signal quality based on beat detection
@@ -1654,6 +1620,16 @@ void updateMAX30100() {
   }
   
   probeQuality = signalQuality > 70 ? "Good" : signalQuality > 40 ? "Fair" : "Poor";
+  
+  // Debug final values every 5 seconds
+  if (millis() - lastSensorDebug >= 5000) {
+    Serial.print(F("Final: HR="));
+    Serial.print(heartRate);
+    Serial.print(F(" SpO2="));
+    Serial.print(spo2);
+    Serial.print(F(" Temp="));
+    Serial.println(temperature, 1);
+  }
   
   // Reset beat detection flag
   beatDetected = false;
@@ -1779,6 +1755,8 @@ void checkTemperature() {
   if (millis() - lastTempUpdate > 5000) { // Update every 5 seconds for faster updates
     demoTemperature = 36.0 + random(0, 16) / 10.0; // 36.0 to 37.5
     lastTempUpdate = millis();
+    Serial.print(F("Temp: "));
+    Serial.println(demoTemperature, 1);
   }
   
   temperature = demoTemperature;
@@ -2260,22 +2238,19 @@ void publishTelemetry() {
   serializeJson(jsonDoc, mqttPayload);
   sprintf(mqttTopic, TOPIC_TELEMETRY, deviceId.c_str());
   
-  Serial.println(F("=== STEP 6: TELEMETRY SEND ==="));
-  Serial.print(F("Device ID: "));
-  Serial.println(deviceId);
-  Serial.print(F("Topic: "));
-  Serial.println(mqttTopic);
-  Serial.print(F("Heart Rate: "));
-  Serial.println(heartRate);
-  Serial.print(F("SpO2: "));
-  Serial.println(spo2);
-  Serial.print(F("Temperature: "));
-  Serial.println(temperature);
-  Serial.print(F("Battery: "));
-  Serial.println(batteryPercent);
-  Serial.print(F("Signal Quality: "));
-  Serial.println(signalQuality);
-  Serial.println(F("=== END TELEMETRY ==="));
+  // Debug telemetry every 5 seconds
+  static unsigned long lastTelemetryDebug = 0;
+  if (millis() - lastTelemetryDebug >= 5000) {
+    lastTelemetryDebug = millis();
+    Serial.print(F("MQTT: HR="));
+    Serial.print(heartRate);
+    Serial.print(F(" SpO2="));
+    Serial.print(spo2);
+    Serial.print(F(" Temp="));
+    Serial.print(temperature, 1);
+    Serial.print(F(" Batt="));
+    Serial.println(batteryPercent);
+  }
   Serial.print(F("Payload size: "));
   Serial.println(strlen(mqttPayload));
   Serial.print(F("MQTT Connected: "));
