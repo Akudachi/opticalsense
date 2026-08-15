@@ -681,8 +681,40 @@ void initializeOLED() {
 void initializeMAX30100() {
   Serial.println(F("Initializing GY-MAX3010x..."));
   
+  // Debug I2C bus
+  Serial.print(F("I2C SDA: "));
+  Serial.print(PIN_I2C_SDA);
+  Serial.print(F(" SCL: "));
+  Serial.println(PIN_I2C_SCL);
+  
+  // Check I2C bus by scanning
+  Serial.println(F("Scanning I2C bus..."));
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  byte error, address;
+  int nDevices = 0;
+  for(address = 1; address < 127; address++ ) {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.print(F("I2C device found at address 0x"));
+      if (address < 16) Serial.print("0");
+      Serial.println(address, HEX);
+      nDevices++;
+    }
+  }
+  if (nDevices == 0) {
+    Serial.println(F("No I2C devices found!"));
+  } else {
+    Serial.print(nDevices);
+    Serial.println(F(" I2C device(s) found"));
+  }
+  
   // Initialize the PulseOximeter
+  Serial.println(F("Calling pox.begin()..."));
   bool initSuccess = pox.begin();
+  
+  Serial.print(F("pox.begin() result: "));
+  Serial.println(initSuccess ? "SUCCESS" : "FAILED");
   
   if (!initSuccess) {
     Serial.println(F("ERROR: MAX30100 init failed! Using demo values only."));
@@ -691,10 +723,14 @@ void initializeMAX30100() {
   }
   
   // Configure the sensor using working configuration
+  Serial.println(F("Setting IR LED current to 7.6 mA..."));
   pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+  
+  Serial.println(F("Setting beat detection callback..."));
   pox.setOnBeatDetectedCallback(onBeatDetected);
   
   Serial.println(F("MAX30100 OK - IR LED = 7.6 mA"));
+  Serial.println(F("Ready for finger placement"));
 }
 
 // ============================================================
@@ -1569,9 +1605,14 @@ void updateMAX30100() {
   
   // Debug sensor readings every 5 seconds
   static unsigned long lastSensorDebug = 0;
+  static unsigned long updateCount = 0;
+  updateCount++;
+  
   if (millis() - lastSensorDebug >= 5000) {
     lastSensorDebug = millis();
-    Serial.print(F("Sensor: BPM="));
+    Serial.print(F("Sensor: Update count="));
+    Serial.print(updateCount);
+    Serial.print(F(" BPM="));
     Serial.print(bpm);
     Serial.print(F(" SpO2="));
     Serial.print(spo2_reading);
@@ -1583,6 +1624,8 @@ void updateMAX30100() {
     Serial.print(bpmValid ? "HR_OK" : "HR_ERR");
     Serial.print(F(" "));
     Serial.println(spo2Valid ? "SPO2_OK" : "SPO2_ERR");
+    
+    updateCount = 0; // Reset counter
   }
   
   // Validate and update values - NO DEMO for HR and SpO2
