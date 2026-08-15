@@ -58,6 +58,24 @@
 #include "MAX30100_PulseOximeter.h"
 
 // ============================================================
+// FUNCTION DECLARATIONS
+// ============================================================
+void updateMAX30100();
+void updateOLED();
+void checkBattery();
+void checkTemperature();
+void publishTelemetry();
+void publishHeartbeat();
+void publishStatus(const char* status);
+void publishPairRequest();
+void handleMQTT();
+void connectMQTT();
+void startTest();
+void stopTest();
+void runTestSampling();
+void printDebugInfo();
+
+// ============================================================
 // PIN CONFIGURATION
 // ============================================================
 // GY-MAX3010x uses I2C - no GPIO pins needed for LEDs
@@ -78,9 +96,9 @@ constexpr int MQTT_KEEPALIVE_SEC = 60;
 constexpr int MQTT_QOS = 1;
 constexpr unsigned long HEARTBEAT_INTERVAL = 5000; // Changed to 5 seconds for faster offline detection
 constexpr unsigned long TELEMETRY_INTERVAL = 1000;
-constexpr unsigned long OLED_REFRESH_INTERVAL = 200;
-constexpr unsigned long BATTERY_CHECK_INTERVAL = 250;
-constexpr unsigned long TEMP_CHECK_INTERVAL = 1000;
+constexpr unsigned long OLED_REFRESH_INTERVAL = 500;  // Slower OLED updates to give more CPU time to sensor
+constexpr unsigned long BATTERY_CHECK_INTERVAL = 1000; // Slower battery checks to give more CPU time to sensor
+constexpr unsigned long TEMP_CHECK_INTERVAL = 2000;   // Slower temp checks to give more CPU time to sensor
 constexpr unsigned long WIFI_RETRY_INTERVAL = 5000;
 constexpr int MAX_WIFI_RETRIES = 10;
 constexpr int LOW_BATTERY_WARNING = 20;
@@ -634,6 +652,7 @@ bool testWiFi() {
   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+    updateMAX30100(); // Keep sensor alive during WiFi test
     delay(500);
     attempts++;
   }
@@ -670,7 +689,11 @@ void initializeOLED() {
   Serial.println(F("OLED Initialized"));
   
   // Clear display again to ensure no cached content
-  delay(100);
+  // Replace blocking delay with sensor updates
+  for(int i = 0; i < 10; i++) {
+    updateMAX30100();
+    delay(10);
+  }
   display.clearDisplay();
   display.display();
 }
@@ -1163,6 +1186,9 @@ void connectMQTT() {
   while (!mqttClient.connected() && attempts < 10) {
     // Feed watchdog to prevent timeout during long MQTT connection
     esp_task_wdt_reset();
+    
+    // CRITICAL: Update sensor during MQTT connection to prevent starvation
+    updateMAX30100();
     
     // Connect with Last Will, Clean Session = False
     if (mqttClient.connect(deviceId.c_str(), mqttUsername.c_str(), mqttPassword.c_str(),
