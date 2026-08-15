@@ -56,6 +56,52 @@ function storeDevices(devices: Device[]): void {
   storeStored(DEVICES_STORAGE_KEY, devices);
 }
 
+// Global device status listener for online/offline detection
+let globalStatusUnsubscribe: (() => void) | null = null;
+
+async function initializeGlobalStatusListener() {
+  if (globalStatusUnsubscribe) return; // Already initialized
+
+  try {
+    await mqttClient.connect();
+    const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
+    console.log('Initializing global device status listener on topic:', statusTopic);
+
+    globalStatusUnsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        console.log('Global device status update received:', topic, data);
+
+        // Extract device ID from topic
+        const deviceIdMatch = topic.match(/device\/([^\/]+)\/status/);
+        if (!deviceIdMatch) return;
+        const deviceId = deviceIdMatch[1];
+
+        // Update device online status
+        const devices = getStoredDevices();
+        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
+        if (idx >= 0) {
+          devices[idx] = {
+            ...devices[idx],
+            online: data.online ?? devices[idx].online,
+            status: data.status ?? devices[idx].status,
+            lastSeen: data.lastSeen ?? devices[idx].lastSeen,
+            deviceState: data.deviceState ?? devices[idx].deviceState,
+            battery: data.battery ?? devices[idx].battery,
+            batteryPct: data.battery ?? devices[idx].batteryPct,
+          };
+          storeDevices(devices);
+          console.log(`Device ${deviceId} status updated: online=${data.online}, status=${data.status}`);
+        }
+      } catch (err) {
+        console.error('Error parsing global status message:', err);
+      }
+    });
+  } catch (err) {
+    console.error('Failed to initialize global status listener:', err);
+  }
+}
+
 // Patient storage helpers
 function getStoredPatients(): Patient[] {
   return getStored<Patient>(PATIENTS_STORAGE_KEY);
@@ -469,10 +515,30 @@ function addActivityEvent(kind: ActivityEvent['kind'], message: string, refId?: 
 // Device service with MQTT pairing support
 export const liveDevices: IDeviceService = {
   list: async (): Promise<Device[]> => {
-    // Return devices from local storage
-    // Online status is now managed by backend via device_status events
+    // Initialize global status listener on first call
+    initializeGlobalStatusListener();
+
+    // Return devices from local storage with client-side offline fallback
     const devices = getStoredDevices();
-    return devices;
+    const now = Date.now();
+    const offlineThreshold = 15000; // 15 seconds - more lenient than backend
+
+    return devices.map(device => {
+      const lastSeenTime = new Date(device.lastSeen).getTime();
+      const isOffline = now - lastSeenTime > offlineThreshold;
+
+      // Only mark as offline if backend hasn't already marked it
+      if (isOffline && device.online) {
+        console.log(`Device ${device.deviceId} appears offline (last seen ${Math.floor((now - lastSeenTime) / 1000)}s ago)`);
+        return {
+          ...device,
+          online: false,
+          status: 'offline',
+        };
+      }
+
+      return device;
+    });
   },
   
   get: async (id: string): Promise<Device | null> => {
@@ -930,40 +996,11 @@ export const liveStream: ISensorStream = {
       }
     });
 
-    // Subscribe to device status updates from backend (for offline detection)
-    const statusUpdateTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status/+`;
-    const unsubscribeStatusUpdate = mqttClient.subscribe(statusUpdateTopic, (topic, message) => {
-      try {
-        const data = JSON.parse(message.toString());
-        console.log('Device status update received:', data);
-
-        // Update device online status based on backend notification
-        const devices = getStoredDevices();
-        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
-        if (idx >= 0) {
-          devices[idx] = {
-            ...devices[idx],
-            online: data.online ?? devices[idx].online,
-            status: data.status ?? devices[idx].status,
-            lastSeen: data.lastSeen ?? devices[idx].lastSeen,
-            deviceState: data.deviceState ?? devices[idx].deviceState,
-            battery: data.battery ?? devices[idx].battery,
-            batteryPct: data.battery ?? devices[idx].batteryPct,
-          };
-          storeDevices(devices);
-          console.log(`Device ${deviceId} status updated: online=${data.online}, status=${data.status}`);
-        }
-      } catch (err) {
-        console.error('Error parsing status update message:', err);
-      }
-    });
-
     // Return combined unsubscribe function
     return () => {
       unsubscribeTelemetry();
       unsubscribeStatus();
       unsubscribeHeartbeat();
-      unsubscribeStatusUpdate();
     };
   },
 
