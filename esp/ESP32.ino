@@ -1378,6 +1378,27 @@ void handleCommand() {
     sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
     mqttClient.publish(mqttTopic, response.c_str());
     Serial.println(F("stop_test response sent"));
+  } else if (command == "unpair") {
+    Serial.println(F("Executing unpair command"));
+    // Clear pairing status
+    isPaired = false;
+    preferences.putBool("isPaired", false);
+    preferences.end();
+    
+    // Reset to WAITING_PAIR state
+    currentState = STATE_WAITING_PAIR;
+    
+    // Generate new pairing code
+    generatePairCode();
+    
+    jsonDoc.clear();
+    jsonDoc["status"] = "success";
+    jsonDoc["message"] = "Device unpaired, showing pairing code";
+    String response;
+    serializeJson(jsonDoc, response);
+    sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
+    mqttClient.publish(mqttTopic, response.c_str());
+    Serial.println(F("unpair response sent"));
   } else if (command == "restart") {
     ESP.restart();
   } else if (command == "factory_reset") {

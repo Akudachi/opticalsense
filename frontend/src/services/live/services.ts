@@ -158,7 +158,7 @@ async function initializeGlobalStatusListener() {
     // if they haven't been seen recently (in case we missed the Last Will message)
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 25000; // 25 seconds - slightly more than backend's 20s to avoid race conditions
+    const offlineThreshold = 35000; // 35 seconds - slightly more than backend's 30s to avoid race conditions
 
     devices.forEach(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
@@ -624,7 +624,7 @@ export const liveDevices: IDeviceService = {
 
     // Add client-side offline detection as backup only for devices marked online
     const now = Date.now();
-    const offlineThreshold = 25000; // 25 seconds - slightly more than backend's 20s to avoid race conditions
+    const offlineThreshold = 35000; // 35 seconds - slightly more than backend's 30s to avoid race conditions
 
     return devices.map(device => {
       // If device is already marked offline by backend, keep it offline
@@ -741,8 +741,26 @@ export const liveDevices: IDeviceService = {
   },
   
   unpair: async (id: string): Promise<void> => {
-    // Remove device from localStorage
+    // Send unpair command to device via MQTT
     const devices = getStoredDevices();
+    const device = devices.find(d => d.id === id);
+    if (device) {
+      try {
+        await mqttClient.connect();
+        const commandTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/commands`;
+        const commandData = {
+          command: 'unpair',
+          deviceId: device.deviceId,
+          timestamp: new Date().toISOString()
+        };
+        mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+        console.log('Sent unpair command to device:', device.deviceId);
+      } catch (err) {
+        console.error('Failed to send unpair command:', err);
+      }
+    }
+
+    // Remove device from localStorage
     const filtered = devices.filter(d => d.id !== id);
     storeDevices(filtered);
     console.log('Device unpaired:', id);
