@@ -55,8 +55,10 @@ mqttClient.on('message', (topic, message) => {
     // Extract device ID from topic
     const deviceId = data.deviceId || (topic.match(/device\/([^\/]+)/)?.[1]);
 
-    // Update device last seen time for any message from a device
-    if (deviceId) {
+    // Update device last seen time for any message FROM a device (not backend-generated status)
+    // Only update if the message is from the device itself (telemetry, heartbeat, status, commands)
+    // Do NOT update for backend-generated status/offline messages to prevent loops
+    if (deviceId && !topic.includes('/status/offline') && !topic.includes('/status/online')) {
       deviceLastSeen.set(deviceId, Date.now());
       console.log(`Updated last seen for device ${deviceId}: ${new Date().toISOString()}`);
     }
