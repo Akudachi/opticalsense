@@ -1338,8 +1338,23 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void handleCommand() {
   String command = jsonDoc["command"];
   
+  Serial.print(F("=== COMMAND RECEIVED ==="));
+  Serial.print(F("Command: "));
+  Serial.println(command);
+  Serial.print(F("Test ID: "));
+  Serial.println(jsonDoc["testId"].as<String>());
+  Serial.print(F("Current state: "));
+  Serial.println(getStateString());
+  Serial.print(F("Test running: "));
+  Serial.println(testRunning ? "YES" : "NO");
+
   if (command == "start_test") {
-    startTest();
+    Serial.println(F("Executing start_test command"));
+    if (testRunning) {
+      Serial.println(F("WARNING: Test already running, ignoring start command"));
+    } else {
+      startTest();
+    }
     jsonDoc.clear();
     jsonDoc["status"] = "success";
     jsonDoc["message"] = "Test started";
@@ -1347,8 +1362,14 @@ void handleCommand() {
     serializeJson(jsonDoc, response);
     sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
     mqttClient.publish(mqttTopic, response.c_str());
+    Serial.println(F("start_test response sent"));
   } else if (command == "stop_test") {
-    stopTest();
+    Serial.println(F("Executing stop_test command"));
+    if (!testRunning) {
+      Serial.println(F("WARNING: Test not running, ignoring stop command"));
+    } else {
+      stopTest();
+    }
     jsonDoc.clear();
     jsonDoc["status"] = "success";
     jsonDoc["message"] = "Test stopped";
@@ -1356,6 +1377,7 @@ void handleCommand() {
     serializeJson(jsonDoc, response);
     sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
     mqttClient.publish(mqttTopic, response.c_str());
+    Serial.println(F("stop_test response sent"));
   } else if (command == "restart") {
     ESP.restart();
   } else if (command == "factory_reset") {
@@ -1368,6 +1390,7 @@ void handleCommand() {
   } else {
     Serial.println(F("Unknown Command"));
   }
+  Serial.println(F("=== END COMMAND ==="));
 }
 
 // ============================================================

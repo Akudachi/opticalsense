@@ -244,8 +244,8 @@ function DashboardPage() {
               onToothChange={setTooth}
               running={running}
               elapsedSec={elapsed}
-              onStart={() => startMut.mutate()}
-              onStop={() => stopMut.mutate()}
+              onStart={() => { if (!running && !startMut.isPending) startMut.mutate(); }}
+              onStop={() => { if (running && activeTestId && !stopMut.isPending) stopMut.mutate(); }}
               onGenerateReport={() => reportMut.mutate()}
               canGenerate={!!lastCompletedTestId && !running}
             />

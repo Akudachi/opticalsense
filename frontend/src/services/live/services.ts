@@ -378,9 +378,9 @@ export const liveTests: ITestService = {
     };
     tests.push(newTest);
     storeTests(tests);
-    
+
     addActivityEvent('test_started', `Test started for patient ${data.patientId}`, newTest.id);
-    
+
     // Send start command to device via MQTT
     try {
       await mqttClient.connect();
@@ -394,8 +394,9 @@ export const liveTests: ITestService = {
       console.log('Sent start_test command to device:', data.deviceId);
     } catch (err) {
       console.error('Failed to send start command:', err);
+      // Even if MQTT fails, we still return the test (frontend state will handle it)
     }
-    
+
     return newTest;
   },
   
