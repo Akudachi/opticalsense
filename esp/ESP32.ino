@@ -1610,7 +1610,7 @@ void updateMAX30100() {
   
   if (millis() - lastSensorDebug >= 5000) {
     lastSensorDebug = millis();
-    Serial.print(F("Sensor: Update count="));
+    Serial.print(F("SENSOR UPDATE: Count="));
     Serial.print(updateCount);
     Serial.print(F(" BPM="));
     Serial.print(bpm);
@@ -1629,6 +1629,9 @@ void updateMAX30100() {
   }
   
   // Validate and update values - NO DEMO for HR and SpO2
+  bool previousHR = heartRate;
+  bool previousSpO2 = spo2;
+  
   if (bpm >= 30 && bpm <= 220 && bpm > 0) {
     heartRate = bpm;
   } else {
@@ -1639,6 +1642,16 @@ void updateMAX30100() {
     spo2 = spo2_reading;
   } else {
     spo2 = 0; // Use real sensor only, no demo
+  }
+  
+  // Alert when values change from 0 to something
+  if (previousHR == 0 && heartRate > 0) {
+    Serial.print(F("ALERT: Heart rate detected! HR="));
+    Serial.println(heartRate);
+  }
+  if (previousSpO2 == 0 && spo2 > 0) {
+    Serial.print(F("ALERT: SpO2 detected! SpO2="));
+    Serial.println(spo2);
   }
   
   // Update finger detection based on valid readings
