@@ -89,15 +89,6 @@ constexpr float HIGH_TEMP_WARNING = 38.0;
 constexpr float LOW_TEMP_WARNING = 34.0;
 constexpr unsigned long REPORT_INTERVAL = 2000; // Display update interval
 
-// ============================================================
-// BEAT DETECTION CALLBACK
-// ============================================================
-void onBeatDetected() {
-  beatDetected = true;
-  lastBeatTime = millis();
-  Serial.println("BEAT");
-}
-
 // Default MQTT Broker Configuration
 constexpr char DEFAULT_MQTT_HOST[] = "6732afdd0ab749f1b5c67e4cd7233db9.s1.eu.hivemq.cloud";
 constexpr char DEFAULT_MQTT_USERNAME[] = "opticalpulp";
@@ -267,6 +258,15 @@ uint32_t redFiltered = 0;
 uint32_t irFiltered = 0;
 bool fingerDetected = false;
 
+// ============================================================
+// BEAT DETECTION CALLBACK
+// ============================================================
+void onBeatDetected() {
+  beatDetected = true;
+  lastBeatTime = millis();
+  Serial.println("BEAT");
+}
+
 // OLD SIGNAL PROCESSING VARIABLES - NO LONGER USED
 // Kept for reference but not used with PulseOximeter library
 int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
@@ -332,15 +332,6 @@ unsigned long lastSensorFailure = 0;
 // Calibration Values (loaded from Preferences)
 float tempCalibrationOffset = TEMP_CALIBRATION_OFFSET;
 float tempCalibrationScale = TEMP_CALIBRATION_SCALE;
-
-// ============================================================
-// BEAT DETECTION CALLBACK
-// ============================================================
-void onBeatDetected() {
-  beatDetected = true;
-  lastBeatTime = millis();
-  Serial.println("BEAT");
-}
 
 // Buffers
 StaticJsonDocument<1024> jsonDoc;
@@ -1227,7 +1218,8 @@ void handleCommand() {
     jsonDoc["message"] = "Test started";
     String response;
     serializeJson(jsonDoc, response);
-    mqttClient.publish((mqttTopic + 1).c_str(), response.c_str());
+    sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
+    mqttClient.publish(mqttTopic, response.c_str());
   } else if (command == "stop_test") {
     stopTest();
     jsonDoc.clear();
@@ -1235,7 +1227,8 @@ void handleCommand() {
     jsonDoc["message"] = "Test stopped";
     String response;
     serializeJson(jsonDoc, response);
-    mqttClient.publish((mqttTopic + 1).c_str(), response.c_str());
+    sprintf(mqttTopic, TOPIC_COMMANDS, deviceId.c_str());
+    mqttClient.publish(mqttTopic, response.c_str());
   } else if (command == "restart") {
     ESP.restart();
   } else if (command == "factory_reset") {
@@ -1576,17 +1569,17 @@ void updateMAX30100() {
     Serial.println(spo2Valid ? "SPO2_OK" : "SPO2_ERR");
   }
   
-  // Validate and update values
+  // Validate and update values - NO DEMO for HR and SpO2
   if (bpm >= 30 && bpm <= 220 && bpm > 0) {
     heartRate = bpm;
-  } else if (heartRate == 0) {
-    heartRate = 75.0; // Demo value
+  } else {
+    heartRate = 0; // Use real sensor only, no demo
   }
   
   if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
     spo2 = spo2_reading;
-  } else if (spo2 == 0) {
-    spo2 = 98.0; // Demo value
+  } else {
+    spo2 = 0; // Use real sensor only, no demo
   }
   
   // Update finger detection based on valid readings
@@ -1852,19 +1845,13 @@ void printDebugInfo() {
   Serial.println(signalQuality, 1);
   Serial.print(F("HR: "));
   Serial.print(heartRate, 1);
-  Serial.print(F(" BPM (Conf: "));
-  Serial.print(heartRateConfidence, 1);
-  Serial.println(F("%)"));
+  Serial.println(F(" BPM"));
   Serial.print(F("SpO2: "));
   Serial.print(spo2, 1);
-  Serial.print(F("% (Conf: "));
-  Serial.print(spo2Confidence, 1);
-  Serial.println(F("%)"));
+  Serial.println(F("%"));
   Serial.print(F("Vitality: "));
   Serial.print(vitalityIndex, 1);
-  Serial.print(F("% (Conf: "));
-  Serial.print(vitalityConfidence, 1);
-  Serial.println(F("%)"));
+  Serial.println(F("%"));
   if (safeMode) {
     Serial.println(F("SAFE MODE ACTIVE"));
   }
