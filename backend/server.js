@@ -33,6 +33,9 @@ const mqttClient = mqtt.connect(process.env.MQTT_URL, {
   reconnectPeriod: 5000
 });
 
+// Track device last seen timestamps for offline detection
+const deviceLastSeen = new Map();
+
 mqttClient.on('connect', () => {
   console.log('Connected to MQTT broker');
   const topicPrefix = process.env.MQTT_TOPIC_PREFIX || 'opticalsense';
@@ -41,19 +44,28 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe(`${topicPrefix}/device/+/command/response`);
   mqttClient.subscribe(`${topicPrefix}/device/+/pair/request`);
   mqttClient.subscribe(`${topicPrefix}/device/+/heartbeat`);
+  mqttClient.subscribe(`${topicPrefix}/device/+/status/+`); // For device online/offline status updates
 });
 
 mqttClient.on('message', (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
     console.log(`MQTT Message [${topic}]:`, data);
-    
+
+    // Extract device ID from topic
+    const deviceId = data.deviceId || (topic.match(/device\/([^\/]+)/)?.[1]);
+
+    // Update device last seen time for any message from a device
+    if (deviceId) {
+      deviceLastSeen.set(deviceId, Date.now());
+    }
+
     // Handle pairing requests
     if (topic.includes('pair/request')) {
       console.log('Received pairing request from device:', data.deviceId);
       console.log('Pairing code:', data.pairingCode);
       console.log('Full topic:', topic);
-      
+
       // Publish pairing response back to the specific device
       const responseTopic = `${topicPrefix}/device/${data.deviceId}/pair/response`;
       const responseData = {
@@ -64,19 +76,20 @@ mqttClient.on('message', (topic, message) => {
         deviceName: data.name || data.deviceId,
         timestamp: new Date().toISOString()
       };
-      
+
       console.log('Response topic:', responseTopic);
       console.log('Response data:', JSON.stringify(responseData));
-      
+
       mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
       console.log('Published pairing response to:', responseTopic);
     }
-    
+
     // Bridge MQTT messages to Socket.IO
     if (topic.includes('telemetry')) {
       // Normalize GY-MAX3010x data format for frontend compatibility
       const normalizedData = {
         ...data,
+        online: true,
         // Ensure GY-MAX3010x specific fields are properly handled
         redRaw: data.redRaw || 0,
         irRaw: data.irRaw || 0,
@@ -93,17 +106,57 @@ mqttClient.on('message', (topic, message) => {
         probeOnTooth: data.fingerDetected || false, // Map fingerDetected to probeOnTooth for compatibility
         ambient: data.ambient || 0, // Keep for backward compatibility
       };
-      
+
       // Emit to both test-specific room and device-specific room
       io.to(`test-${data.testId}`).emit('telemetry', normalizedData);
       io.to(`device-${data.deviceId}`).emit('telemetry', normalizedData);
-      
+
       console.log('Bridged telemetry to Socket.IO for device:', data.deviceId);
+    }
+
+    // Handle heartbeat - also emit device status update via MQTT and Socket.IO
+    if (topic.includes('heartbeat') && deviceId) {
+      const statusTopic = `${topicPrefix}/device/${deviceId}/status/online`;
+      const statusData = {
+        deviceId,
+        online: true,
+        status: 'online',
+        lastSeen: new Date().toISOString(),
+        deviceState: data.state,
+        battery: data.battery,
+        wifi: data.wifi,
+        mqtt: data.mqtt
+      };
+      mqttClient.publish(statusTopic, JSON.stringify(statusData));
+      io.to(`device-${deviceId}`).emit('device_status', statusData);
     }
   } catch (err) {
     console.error('Error parsing MQTT message:', err);
   }
 });
+
+// Check for offline devices every 5 seconds
+setInterval(() => {
+  const now = Date.now();
+  const offlineThreshold = 10000; // 10 seconds
+
+  deviceLastSeen.forEach((lastSeen, deviceId) => {
+    if (now - lastSeen > offlineThreshold) {
+      // Device is offline - publish via MQTT and Socket.IO for frontend to receive
+      const statusTopic = `${topicPrefix}/device/${deviceId}/status/offline`;
+      const statusData = {
+        deviceId,
+        online: false,
+        status: 'offline',
+        lastSeen: new Date(lastSeen).toISOString()
+      };
+      mqttClient.publish(statusTopic, JSON.stringify(statusData));
+      io.to(`device-${deviceId}`).emit('device_status', statusData);
+      console.log(`Device ${deviceId} marked as offline`);
+      deviceLastSeen.delete(deviceId);
+    }
+  });
+}, 5000);
 
 // Socket.IO Connection
 io.on('connection', (socket) => {
