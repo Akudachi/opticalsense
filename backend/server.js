@@ -139,7 +139,7 @@ mqttClient.on('message', (topic, message) => {
 // Check for offline devices every 5 seconds
 setInterval(() => {
   const now = Date.now();
-  const offlineThreshold = 10000; // 10 seconds
+  const offlineThreshold = 20000; // Increased to 20 seconds to prevent false offline detection
 
   console.log(`Checking offline devices - tracked devices: ${deviceLastSeen.size}`);
 

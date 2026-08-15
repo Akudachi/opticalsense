@@ -158,7 +158,7 @@ async function initializeGlobalStatusListener() {
     // if they haven't been seen recently (in case we missed the Last Will message)
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 15000; // 15 seconds
+    const offlineThreshold = 25000; // 25 seconds - slightly more than backend's 20s to avoid race conditions
 
     devices.forEach(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
@@ -613,7 +613,7 @@ export const liveDevices: IDeviceService = {
 
     // Add client-side offline detection as backup only for devices marked online
     const now = Date.now();
-    const offlineThreshold = 15000; // 15 seconds - more lenient to avoid false positives
+    const offlineThreshold = 25000; // 25 seconds - slightly more than backend's 20s to avoid race conditions
 
     return devices.map(device => {
       // If device is already marked offline by backend, keep it offline
