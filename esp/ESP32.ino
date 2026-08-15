@@ -66,7 +66,7 @@ void checkBattery();
 void checkTemperature();
 void publishTelemetry();
 void publishHeartbeat();
-void publishStatus(const char* status);
+void publishStatus(String status);
 void publishPairRequest();
 void handleMQTT();
 void connectMQTT();
@@ -74,6 +74,7 @@ void startTest();
 void stopTest();
 void runTestSampling();
 void printDebugInfo();
+String getStateString();
 
 // ============================================================
 // PIN CONFIGURATION
@@ -1204,7 +1205,7 @@ void connectMQTT() {
       mqttClient.subscribe(mqttTopic, MQTT_QOS);
       
       // Publish online status
-      publishStatus("online");
+      publishStatus(String("online"));
       
       break;
     } else {
