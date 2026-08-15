@@ -58,8 +58,21 @@
 #include "MAX30100_PulseOximeter.h"
 
 // ============================================================
+// SENSOR SAFE DELAY - Non-blocking delay wrapper
+// ============================================================
+void sensorSafeDelay(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    // Only update sensor if it's been initialized to prevent crashes
+    updateMAX30100(); // Use the wrapper function that checks initialization
+    delay(1); // Small delay to prevent watchdog issues
+  }
+}
+
+// ============================================================
 // FUNCTION DECLARATIONS
 // ============================================================
+void sensorSafeDelay(unsigned long ms);
 void updateMAX30100();
 void updateOLED();
 void checkBattery();
@@ -627,8 +640,11 @@ bool testOLED() {
 }
 
 bool testMAX30100() {
-  // Test MAX30100 using PulseOximeter library
-  return pox.begin();
+  // Passive I2C scan at MAX30100 native address (0x57) to avoid double initialization
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.beginTransmission(0x57);
+  byte error = Wire.endTransmission();
+  return (error == 0); // Device found if no error
 }
 
 bool testLM35() {
@@ -653,8 +669,7 @@ bool testWiFi() {
   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-    updateMAX30100(); // Keep sensor alive during WiFi test
-    delay(500);
+    sensorSafeDelay(500); // Non-blocking delay with sensor updates
     attempts++;
   }
   bool result = (WiFi.status() == WL_CONNECTED);
@@ -690,11 +705,7 @@ void initializeOLED() {
   Serial.println(F("OLED Initialized"));
   
   // Clear display again to ensure no cached content
-  // Replace blocking delay with sensor updates
-  for(int i = 0; i < 10; i++) {
-    updateMAX30100();
-    delay(10);
-  }
+  sensorSafeDelay(100); // Non-blocking delay with sensor updates
   display.clearDisplay();
   display.display();
 }
@@ -732,6 +743,10 @@ void initializeMAX30100() {
     Serial.print(nDevices);
     Serial.println(F(" I2C device(s) found"));
   }
+  
+  // Ensure I2C is properly configured with stable clock before sensor initialization
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(100000); // Set stable 100kHz I2C clock
   
   // Initialize the PulseOximeter
   Serial.println(F("Calling pox.begin()..."));
@@ -860,7 +875,7 @@ void connectWiFi() {
   
   // Disconnect any existing connection
   WiFi.disconnect();
-  delay(500);
+  sensorSafeDelay(500);
   
   // Set mode to station only
   WiFi.mode(WIFI_STA);
@@ -869,7 +884,7 @@ void connectWiFi() {
   
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) { // Increased attempts to 30 (15 seconds)
-    delay(500);
+    sensorSafeDelay(500);
     Serial.print(".");
     attempts++;
   }
@@ -913,7 +928,7 @@ void startAPMode() {
   
   // Disconnect any existing connection
   WiFi.disconnect();
-  delay(500);
+  sensorSafeDelay(500);
   
   // Set mode to AP only
   WiFi.mode(WIFI_AP);
@@ -1027,7 +1042,7 @@ void handleWebSave() {
     
     server.send(200, "text/html", html);
     
-    delay(2000);
+    sensorSafeDelay(2000);
     ESP.restart();
   } else {
     server.send(400, "text/plain", "Missing credentials");
@@ -1118,7 +1133,7 @@ void handleWebFactoryReset() {
   serializeJson(jsonDoc, response);
   server.send(200, "application/json", response);
   
-  delay(1000);
+  sensorSafeDelay(1000);
   performFactoryReset();
 }
 
@@ -1188,9 +1203,6 @@ void connectMQTT() {
     // Feed watchdog to prevent timeout during long MQTT connection
     esp_task_wdt_reset();
     
-    // CRITICAL: Update sensor during MQTT connection to prevent starvation
-    updateMAX30100();
-    
     // Connect with Last Will, Clean Session = False
     if (mqttClient.connect(deviceId.c_str(), mqttUsername.c_str(), mqttPassword.c_str(),
                           mqttTopic, MQTT_QOS, false, willMessage, false)) {
@@ -1210,7 +1222,7 @@ void connectMQTT() {
       break;
     } else {
       Serial.print(".");
-      delay(1000);
+      sensorSafeDelay(1000); // Non-blocking delay with sensor updates
       attempts++;
     }
   }
@@ -1623,6 +1635,11 @@ void runTestSampling() {
 // UPDATE MAX30100 - Read sensor data using PulseOximeter
 // ============================================================
 void updateMAX30100() {
+  // Only update sensor if it's been initialized to prevent crashes
+  if (currentState < STATE_READY) {
+    return; // Skip sensor updates before initialization
+  }
+  
   // IMPORTANT: Must run continuously
   pox.update();
   
@@ -2409,7 +2426,7 @@ void publishBufferedTelemetry() {
       break;
     }
     
-    delay(10); // Small delay between publishes
+    sensorSafeDelay(10); // Non-blocking delay with sensor updates between publishes
   }
 }
 
@@ -2465,6 +2482,6 @@ void performFactoryReset() {
   preferences.end();
   
   // Restart
-  delay(1000);
+  sensorSafeDelay(1000);
   ESP.restart();
 }
