@@ -60,27 +60,40 @@ function storeDevices(devices: Device[]): void {
 let globalStatusUnsubscribe: (() => void) | null = null;
 
 async function initializeGlobalStatusListener() {
-  if (globalStatusUnsubscribe) return; // Already initialized
+  if (globalStatusUnsubscribe) {
+    console.log('Global status listener already initialized');
+    return; // Already initialized
+  }
 
   try {
     await mqttClient.connect();
     const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
     console.log('Initializing global device status listener on topic:', statusTopic);
+    console.log('MQTT connected:', mqttClient.isConnected());
 
     globalStatusUnsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
-        console.log('Global device status update received:', topic, data);
+        console.log('=== GLOBAL STATUS UPDATE ===');
+        console.log('Topic:', topic);
+        console.log('Data:', data);
 
         // Extract device ID from topic
         const deviceIdMatch = topic.match(/device\/([^\/]+)\/status/);
-        if (!deviceIdMatch) return;
+        if (!deviceIdMatch) {
+          console.log('Could not extract device ID from topic:', topic);
+          return;
+        }
         const deviceId = deviceIdMatch[1];
+        console.log('Device ID from topic:', deviceId);
 
         // Update device online status
         const devices = getStoredDevices();
+        console.log('Current devices:', devices.map(d => ({ id: d.id, deviceId: d.deviceId, online: d.online })));
+
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
         if (idx >= 0) {
+          const oldStatus = devices[idx].online;
           devices[idx] = {
             ...devices[idx],
             online: data.online ?? devices[idx].online,
@@ -91,12 +104,15 @@ async function initializeGlobalStatusListener() {
             batteryPct: data.battery ?? devices[idx].batteryPct,
           };
           storeDevices(devices);
-          console.log(`Device ${deviceId} status updated: online=${data.online}, status=${data.status}`);
+          console.log(`Device ${deviceId} status updated: ${oldStatus} -> ${data.online}, status: ${data.status}`);
+        } else {
+          console.log(`Device ${deviceId} not found in stored devices`);
         }
       } catch (err) {
         console.error('Error parsing global status message:', err);
       }
     });
+    console.log('Global status listener subscription successful');
   } catch (err) {
     console.error('Failed to initialize global status listener:', err);
   }
@@ -521,15 +537,16 @@ export const liveDevices: IDeviceService = {
     // Return devices from local storage with client-side offline fallback
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 15000; // 15 seconds - more lenient than backend
+    const offlineThreshold = 12000; // 12 seconds - slightly more lenient than backend's 10s
 
     return devices.map(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
-      const isOffline = now - lastSeenTime > offlineThreshold;
+      const timeSinceLastSeen = now - lastSeenTime;
+      const isOffline = timeSinceLastSeen > offlineThreshold;
 
       // Only mark as offline if backend hasn't already marked it
       if (isOffline && device.online) {
-        console.log(`Device ${device.deviceId} appears offline (last seen ${Math.floor((now - lastSeenTime) / 1000)}s ago)`);
+        console.log(`Client-side offline detection: Device ${device.deviceId} last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago, marking offline`);
         return {
           ...device,
           online: false,

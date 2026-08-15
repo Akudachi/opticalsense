@@ -35,10 +35,10 @@ const mqttClient = mqtt.connect(process.env.MQTT_URL, {
 
 // Track device last seen timestamps for offline detection
 const deviceLastSeen = new Map();
+const topicPrefix = process.env.MQTT_TOPIC_PREFIX || 'opticalsense';
 
 mqttClient.on('connect', () => {
   console.log('Connected to MQTT broker');
-  const topicPrefix = process.env.MQTT_TOPIC_PREFIX || 'opticalsense';
   mqttClient.subscribe(`${topicPrefix}/device/+/telemetry`);
   mqttClient.subscribe(`${topicPrefix}/device/+/status`);
   mqttClient.subscribe(`${topicPrefix}/device/+/command/response`);
@@ -58,6 +58,7 @@ mqttClient.on('message', (topic, message) => {
     // Update device last seen time for any message from a device
     if (deviceId) {
       deviceLastSeen.set(deviceId, Date.now());
+      console.log(`Updated last seen for device ${deviceId}: ${new Date().toISOString()}`);
     }
 
     // Handle pairing requests
@@ -140,8 +141,13 @@ setInterval(() => {
   const now = Date.now();
   const offlineThreshold = 10000; // 10 seconds
 
+  console.log(`Checking offline devices - tracked devices: ${deviceLastSeen.size}`);
+
   deviceLastSeen.forEach((lastSeen, deviceId) => {
-    if (now - lastSeen > offlineThreshold) {
+    const timeSinceLastSeen = now - lastSeen;
+    console.log(`Device ${deviceId}: last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago`);
+
+    if (timeSinceLastSeen > offlineThreshold) {
       // Device is offline - publish via MQTT and Socket.IO for frontend to receive
       const statusTopic = `${topicPrefix}/device/${deviceId}/status/offline`;
       const statusData = {
@@ -152,7 +158,7 @@ setInterval(() => {
       };
       mqttClient.publish(statusTopic, JSON.stringify(statusData));
       io.to(`device-${deviceId}`).emit('device_status', statusData);
-      console.log(`Device ${deviceId} marked as offline`);
+      console.log(`Device ${deviceId} marked as offline (last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago)`);
       deviceLastSeen.delete(deviceId);
     }
   });
