@@ -30,6 +30,24 @@ export function useLiveSensors(deviceId: string | undefined, active: boolean) {
 export function useSystemStatus() {
   const services = getServices();
   const [status, setStatus] = useState<SystemStatus>(services.stream.systemStatus());
+
+  // Also update devicesOnline count from actual device list
+  useEffect(() => {
+    const updateStatus = async () => {
+      const devices = await services.devices.list();
+      const onlineCount = devices.filter(d => d.online).length;
+      setStatus({
+        ...services.stream.systemStatus(),
+        devicesOnline: onlineCount,
+        lastUpdate: new Date().toISOString(),
+      });
+    };
+
+    updateStatus();
+    const interval = setInterval(updateStatus, 3000); // Update every 3 seconds
+    return () => clearInterval(interval);
+  }, [services]);
+
   useEffect(() => services.stream.onStatus(setStatus), [services.stream]);
   return status;
 }
