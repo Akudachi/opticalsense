@@ -451,22 +451,32 @@ void loop() {
   // Handle MQTT
   handleMQTT();
   
+  // IMPORTANT: Update sensor continuously at high frequency (every loop iteration)
+  // MAX30100 needs frequent updates to work properly like the GPT code
+  updateMAX30100();
+  
   // Update OLED
   if (currentMillis - lastOledRefresh >= OLED_REFRESH_INTERVAL) {
     updateOLED();
     lastOledRefresh = currentMillis;
+    // Update sensor again after OLED operation
+    updateMAX30100();
   }
   
   // Check Battery
   if (currentMillis - lastBatteryCheck >= BATTERY_CHECK_INTERVAL) {
     checkBattery();
     lastBatteryCheck = currentMillis;
+    // Update sensor again after battery check
+    updateMAX30100();
   }
   
   // Check Temperature
   if (currentMillis - lastTempCheck >= TEMP_CHECK_INTERVAL) {
     checkTemperature();
     lastTempCheck = currentMillis;
+    // Update sensor again after temperature check
+    updateMAX30100();
   }
   
   // Heartbeat
@@ -478,6 +488,8 @@ void loop() {
       publishPairRequest();
     }
     lastHeartbeat = currentMillis;
+    // Update sensor again after heartbeat
+    updateMAX30100();
   }
   
   // Telemetry
@@ -485,6 +497,8 @@ void loop() {
     // Always publish telemetry to keep website updated with sensor data
     publishTelemetry();
     lastTelemetry = currentMillis;
+    // Update sensor again after telemetry
+    updateMAX30100();
   }
   
   // Debug output every 5 seconds
@@ -492,10 +506,9 @@ void loop() {
   if (currentMillis - lastDebugOutput >= 5000) {
     printDebugInfo();
     lastDebugOutput = currentMillis;
+    // Update sensor again after debug output
+    updateMAX30100();
   }
-  
-  // Always update sensor for finger detection and continuous readings
-  updateMAX30100();
   
   // Test Sampling - Run to count samples during test and provide debug output
   runTestSampling();
@@ -504,6 +517,9 @@ void loop() {
   if (diagnosticMode) {
     runDiagnosticSampling();
   }
+  
+  // One final sensor update before yield
+  updateMAX30100();
   
   // Yield to background ESP32 tasks
   yield();
