@@ -109,7 +109,7 @@ function PatientsPage() {
         </div>
       </div>
 
-      <GlassCard padded={false}>
+      <GlassCard padded={false} className="max-h-[calc(100vh-200px)] overflow-y-auto">
         <Table>
           <TableHeader>
             <TableRow>

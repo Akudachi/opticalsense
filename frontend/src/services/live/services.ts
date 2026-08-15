@@ -528,6 +528,16 @@ export const liveReports: IReportService = {
     
     return newReport;
   },
+
+  remove: async (id: string) => {
+    const reports = getStoredReports();
+    const filtered = reports.filter(r => r.id !== id);
+    storeReports(filtered);
+    
+    addActivityEvent('report_deleted', `Report ${id} deleted`, id);
+    
+    return true;
+  },
 };
 
 // Clinic service with localStorage
