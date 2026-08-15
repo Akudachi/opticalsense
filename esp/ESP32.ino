@@ -80,7 +80,7 @@ void sensorSafeDelay(unsigned long ms);
 // ============================================================
 void sensorSafeDelay(unsigned long ms);
 void updateMAX30100();
-int16_t redSampleLast();
+int32_t redSampleLast();
 void updateOLED();
 void checkBattery();
 void checkTemperature();
@@ -318,17 +318,18 @@ void onBeatDetected() {
 // SIGNAL PROCESSING VARIABLES — actively used by updateMAX30100()'s AC/DC +
 // peak-detection pipeline (previously dormant while the PulseOximeter library
 // was in use; now driving the real sensor values below)
-int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
-int16_t irBuffer[FILTER_BUFFER_SIZE] = {0};
+// Changed to int32_t to prevent integer overflow with large DC values
+int32_t redBuffer[FILTER_BUFFER_SIZE] = {0};
+int32_t irBuffer[FILTER_BUFFER_SIZE] = {0};
 int bufferIndex = 0;
-int16_t redLowPass = 0;
-int16_t irLowPass = 0;
-int16_t redBaseline = 0;
-int16_t irBaseline = 0;
+int32_t redLowPass = 0;
+int32_t irLowPass = 0;
+int32_t redBaseline = 0;
+int32_t irBaseline = 0;
 unsigned long peakTimes[10] = {0};
 int peakCount = 0;
 unsigned long lastPeakTime = 0;
-int16_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
+int32_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
 bool pulseDetected = false;
 float redAC = 0.0;
 float redDC = 0.0;
@@ -1694,12 +1695,13 @@ void updateMAX30100() {
     sensorSaturated = (irValue >= 65000 || redValue >= 65000);
     
     // --- DC (baseline) tracking: slow exponential moving average ---
-    irBaseline = irBaseline + (int16_t)(((int32_t)irValue - irBaseline) * LOW_PASS_ALPHA);
-    redBaseline = redBaseline + (int16_t)(((int32_t)redValue - redBaseline) * LOW_PASS_ALPHA);
+    irBaseline = irBaseline + (int32_t)(((int32_t)irValue - irBaseline) * LOW_PASS_ALPHA);
+    redBaseline = redBaseline + (int32_t)(((int32_t)redValue - redBaseline) * LOW_PASS_ALPHA);
     
     // --- AC (pulsatile) component = raw sample minus its own DC baseline ---
-    int16_t irSample = (int16_t)irValue - irBaseline;
-    int16_t redSample = (int16_t)redValue - redBaseline;
+    // Use int32_t to prevent overflow with large DC values (e.g., 28,591)
+    int32_t irSample = (int32_t)irValue - (int32_t)irBaseline;
+    int32_t redSample = (int32_t)redValue - (int32_t)redBaseline;
     
     // Store into the circular buffers so we can measure peak-to-peak amplitude
     irBuffer[bufferIndex] = irSample;
@@ -1707,7 +1709,7 @@ void updateMAX30100() {
     bufferIndex = (bufferIndex + 1) % FILTER_BUFFER_SIZE;
     
     // Light smoothing on the IR AC channel, used only for peak (beat) detection
-    irLowPass = irLowPass + (int16_t)((irSample - irLowPass) * 0.3f);
+    irLowPass = irLowPass + (int32_t)((irSample - irLowPass) * 0.3f);
     
     // --- Peak detection on the smoothed IR AC signal ---
     if (irLowPass > adaptiveThreshold && !rising && (now - lastPeakTime) > MIN_PEAK_INTERVAL) {
@@ -1763,8 +1765,8 @@ void updateMAX30100() {
   
   // Expose raw DC levels for telemetry/OLED (these are now REAL sensor values,
   // not the old hardcoded 50000/60000 placeholders)
-  redRaw = (uint32_t)max((int32_t)0, redBaseline);
-  irRaw = (uint32_t)max((int32_t)0, irBaseline);
+  redRaw = (uint32_t)max((int32_t)0, (int32_t)redBaseline);
+  irRaw = (uint32_t)max((int32_t)0, (int32_t)irBaseline);
   
   // --- Baseline stability tracking ---
   // Only use AC calculations if baseline has been stable
@@ -1877,7 +1879,7 @@ void updateMAX30100() {
 }
 
 // Small helper: last raw AC sample written into the RED buffer, for display filtering
-int16_t redSampleLast() {
+int32_t redSampleLast() {
   int lastIdx = (bufferIndex - 1 + FILTER_BUFFER_SIZE) % FILTER_BUFFER_SIZE;
   return redBuffer[lastIdx];
 }
@@ -1911,14 +1913,14 @@ void processSignals() {
 // anywhere in the current firmware; safe to delete once you're sure nothing
 // external references them.
 
-int16_t medianFilter(int16_t* buffer, int size) {
+int32_t medianFilter(int32_t* buffer, int size) {
   return 0;
 }
 
 void updateBaseline() {
 }
 
-int16_t rejectOutliers(int16_t value, int16_t* buffer, int size) {
+int32_t rejectOutliers(int32_t value, int32_t* buffer, int size) {
   return value;
 }
 
