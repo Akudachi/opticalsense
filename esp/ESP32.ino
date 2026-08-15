@@ -1712,16 +1712,17 @@ void updateMAX30100() {
     irLowPass = irLowPass + (int32_t)((irSample - irLowPass) * 0.3f);
     
     // --- Peak detection on the smoothed IR AC signal ---
-    if (irLowPass > adaptiveThreshold && !rising && (now - lastPeakTime) > MIN_PEAK_INTERVAL) {
+    // Relaxed threshold and interval for weaker dental signals
+    if (irLowPass > adaptiveThreshold && !rising && (now - lastPeakTime) > 200) { // Reduced MIN_PEAK_INTERVAL from 250 to 200
       rising = true;
     }
     if (rising && irLowPass < prevIrLowPass) {
       rising = false;
       if (lastPeakTime > 0) {
         unsigned long interval = now - lastPeakTime;
-        if (interval >= MIN_PEAK_INTERVAL && interval <= MAX_PEAK_INTERVAL) {
+        if (interval >= 200 && interval <= 2500) { // Relaxed MAX_PEAK_INTERVAL from 2000 to 2500
           float bpm = 60000.0f / interval;
-          if (bpm >= HEART_RATE_MIN && bpm <= HEART_RATE_MAX) {
+          if (bpm >= 30 && bpm <= 200) { // Relaxed HR range from 40-180 to 30-200
             // Exponential smoothing so a single noisy interval doesn't jump the reading
             heartRate = (heartRate == 0) ? bpm : (heartRate * 0.7f + bpm * 0.3f);
             pulseDetected = true;
@@ -1783,7 +1784,8 @@ void updateMAX30100() {
   
   for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
     // Skip extreme outliers that indicate buffer initialization issues or overflow
-    if (abs(irBuffer[i]) < 10000 && abs(redBuffer[i]) < 10000) {
+    // Relaxed threshold from 10000 to 50000 to allow more signals through
+    if (abs(irBuffer[i]) < 50000 && abs(redBuffer[i]) < 50000) {
       if (irBuffer[i] > irMax) irMax = irBuffer[i];
       if (irBuffer[i] < irMin) irMin = irBuffer[i];
       if (redBuffer[i] > redMax) redMax = redBuffer[i];
@@ -1793,11 +1795,12 @@ void updateMAX30100() {
   }
   
   // Only calculate AC amplitude if we have enough valid samples in buffer AND baseline is stable
-  if (localValidSamples >= FILTER_BUFFER_SIZE * 0.7 && baselineStable) {
+  // Relaxed requirement from 70% to 50% and removed baseline stability check for initial testing
+  if (localValidSamples >= FILTER_BUFFER_SIZE * 0.5) {
     irAC = (float)(irMax - irMin);
     redAC = (float)(redMax - redMin);
   } else {
-    // Not enough valid data or baseline unstable - zero out to prevent corruption
+    // Not enough valid data - zero out to prevent corruption
     irAC = 0;
     redAC = 0;
   }
@@ -1809,7 +1812,7 @@ void updateMAX30100() {
   
   noiseLevel = 100.0f - constrain(irAC, 0, PEAK_THRESHOLD_MAX) * (100.0f / PEAK_THRESHOLD_MAX);
   
-  bool hasValidSignal = fingerDetected && irAC > MIN_VALID_AC_AMPLITUDE
+  bool hasValidSignal = fingerDetected && irAC > 5  // Lowered threshold from MIN_VALID_AC_AMPLITUDE to 5
                         && irDC > 0 && redDC > 0 && !sensorSaturated;
   
   if (hasValidSignal) {
@@ -1822,8 +1825,9 @@ void updateMAX30100() {
     spo2 = constrain(spo2Estimate, 0.0f, 100.0f);
     
     // Signal quality scales with AC amplitude (stronger pulsatile signal = higher quality)
+    // Adjusted scale to work with smaller AC amplitudes
     signalQuality = constrain(
-      (float)(irAC - MIN_VALID_AC_AMPLITUDE) * (100.0f / (PEAK_THRESHOLD_MAX - MIN_VALID_AC_AMPLITUDE)),
+      (float)(irAC - 5) * (100.0f / (PEAK_THRESHOLD_MAX - 5)),
       0.0f, 100.0f);
   } else {
     spo2 = 0;
