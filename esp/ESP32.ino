@@ -318,18 +318,17 @@ void onBeatDetected() {
 // SIGNAL PROCESSING VARIABLES — actively used by updateMAX30100()'s AC/DC +
 // peak-detection pipeline (previously dormant while the PulseOximeter library
 // was in use; now driving the real sensor values below)
-// Changed to int32_t to prevent integer overflow with large DC values
-int32_t redBuffer[FILTER_BUFFER_SIZE] = {0};
-int32_t irBuffer[FILTER_BUFFER_SIZE] = {0};
+int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
+int16_t irBuffer[FILTER_BUFFER_SIZE] = {0};
 int bufferIndex = 0;
-int32_t redLowPass = 0;
-int32_t irLowPass = 0;
-int32_t redBaseline = 0;
-int32_t irBaseline = 0;
+int16_t redLowPass = 0;
+int16_t irLowPass = 0;
+int16_t redBaseline = 0;
+int16_t irBaseline = 0;
 unsigned long peakTimes[10] = {0};
 int peakCount = 0;
 unsigned long lastPeakTime = 0;
-int32_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
+int16_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
 bool pulseDetected = false;
 float redAC = 0.0;
 float redDC = 0.0;
@@ -1682,6 +1681,7 @@ void updateMAX30100() {
   static unsigned long lastSampleSeen = 0; // for stuck-FIFO recovery, see below
   static unsigned long lastBaselineChange = 0; // Track baseline stability
   static int32_t lastIrBaseline = 0;
+  static bool baselineStable = false; // Track if baseline is stable
   
   uint16_t irValue, redValue;
   bool gotAnySample = false;
@@ -1698,9 +1698,8 @@ void updateMAX30100() {
     redBaseline = redBaseline + (int16_t)(((int32_t)redValue - redBaseline) * LOW_PASS_ALPHA);
     
     // --- AC (pulsatile) component = raw sample minus its own DC baseline ---
-    // Use int32_t to prevent overflow with large DC values (e.g., 28,591)
-    int32_t irSample = (int32_t)irValue - (int32_t)irBaseline;
-    int32_t redSample = (int32_t)redValue - (int32_t)redBaseline;
+    int16_t irSample = (int16_t)irValue - irBaseline;
+    int16_t redSample = (int16_t)redValue - redBaseline;
     
     // Store into the circular buffers so we can measure peak-to-peak amplitude
     irBuffer[bufferIndex] = irSample;
@@ -1764,8 +1763,8 @@ void updateMAX30100() {
   
   // Expose raw DC levels for telemetry/OLED (these are now REAL sensor values,
   // not the old hardcoded 50000/60000 placeholders)
-  redRaw = (uint32_t)max((int16_t)0, redBaseline);
-  irRaw = (uint32_t)max((int16_t)0, irBaseline);
+  redRaw = (uint32_t)max((int32_t)0, redBaseline);
+  irRaw = (uint32_t)max((int32_t)0, irBaseline);
   
   // --- Baseline stability tracking ---
   // Only use AC calculations if baseline has been stable
@@ -1773,23 +1772,7 @@ void updateMAX30100() {
     lastBaselineChange = millis();
     lastIrBaseline = irBaseline;
   }
-  bool baselineStable = (millis() - lastBaselineChange) > 2000;
-  
-  // --- Baseline stability tracking ---
-  // Only use AC calculations if baseline has been stable
-  if (abs(irBaseline - lastIrBaseline) > 100) {
-    lastBaselineChange = millis();
-    lastIrBaseline = irBaseline;
-  }
-  bool baselineStable = (millis() - lastBaselineChange) > 2000;
-  
-  // --- Baseline stability tracking ---
-  // Only use AC calculations if baseline has been stable
-  if (abs(irBaseline - lastIrBaseline) > 100) {
-    lastBaselineChange = millis();
-    lastIrBaseline = irBaseline;
-  }
-  bool baselineStable = (millis() - lastBaselineChange) > 2000;
+  baselineStable = (millis() - lastBaselineChange) > 2000;
   
   // --- Peak-to-peak AC amplitude over the buffer window, for SpO2 estimate + quality ---
   // Use int32_t for min/max to prevent overflow, and add outlier filtering
@@ -1822,8 +1805,7 @@ void updateMAX30100() {
   redFiltered = (uint32_t)abs(redSampleLast());
   irFiltered = (uint32_t)abs(irLowPass);
   
-  // Calculate noise level with proper range checking
-  noiseLevel = 100.0f - constrain((float)irAC, 0.0f, (float)PEAK_THRESHOLD_MAX) * (100.0f / (float)PEAK_THRESHOLD_MAX);
+  noiseLevel = 100.0f - constrain(irAC, 0, PEAK_THRESHOLD_MAX) * (100.0f / PEAK_THRESHOLD_MAX);
   
   bool hasValidSignal = fingerDetected && irAC > MIN_VALID_AC_AMPLITUDE
                         && irDC > 0 && redDC > 0 && !sensorSaturated;
