@@ -1,22 +1,30 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.1.0
+ * Version: 3.2.0
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
  * 
- * Changes in v3.1.0:
- * - Switched to MAX30100_PulseOximeter library for better sensor integration
- * - Simplified sensor logic using library's built-in SpO2 and heart rate calculation
- * - Added beat detection callback from library
- * - Removed custom signal processing (handled by library)
- * - Temperature and battery use demo data for now
- * - Maintained all WiFi/MQTT/infrastructure functionality
+ * Changes in v3.2.0:
+ * - Reverted from the MAX30100_PulseOximeter wrapper back to the low-level
+ *   MAX30100 raw-sample driver. The wrapper's beat detector and SpO2 calculator
+ *   are tuned for a fingertip pressed on the sensor and never validated a beat
+ *   against the much weaker dental-probe signal, so heartRate/spo2/redRaw/irRaw
+ *   were permanently stuck at 0.
+ * - Revived the AC/DC extraction + adaptive peak-detection pipeline in
+ *   updateMAX30100() (buffers/constants for this already existed in the file
+ *   but were dormant while the library was in use).
+ * - redRaw/irRaw now report real DC baseline values from the sensor instead of
+ *   hardcoded 50000/60000 placeholders.
+ * - SpO2 is now an uncalibrated relative estimate (ratio-of-ratios formula) —
+ *   treat it as a trend indicator for THIS probe, not a clinical SpO2 value.
+ * - PROBE_CONTACT_THRESHOLD and the LED current need on-device calibration;
+ *   watch the "RAW:" debug line over serial with probe on/off the tooth.
  * 
- * IMPORTANT: This firmware uses the MAX30100_PulseOximeter library
- * Install library in Arduino IDE: Sketch -> Include Library -> Manage Libraries
- * Search for "MAX30100" by MAX30100 (PulseOximeter)
+ * IMPORTANT: This firmware uses the low-level MAX30100 driver class (NOT
+ * PulseOximeter). Install the same "MAX30100" library in Arduino IDE:
+ * Sketch -> Include Library -> Manage Libraries -> search "MAX30100"
  * 
  * Hardware Connections:
  * - GY-MAX3010x SDA -> GPIO21
@@ -55,7 +63,12 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 #include <esp_task_wdt.h>
-#include "MAX30100_PulseOximeter.h"
+#include "MAX30100.h"  // Low-level raw-sample driver (NOT the PulseOximeter wrapper).
+                        // The PulseOximeter class is tuned for fingertip PPG signals and
+                        // its beat detector rarely locks onto the much weaker dental pulp
+                        // signal, which is why heartRate/spo2/redRaw/irRaw stayed at 0.
+                        // We read raw IR/RED samples directly and do our own AC/DC
+                        // extraction + peak detection below, tuned for a weak signal.
 
 // ============================================================
 // SENSOR SAFE DELAY - Non-blocking delay wrapper
@@ -67,6 +80,7 @@ void sensorSafeDelay(unsigned long ms);
 // ============================================================
 void sensorSafeDelay(unsigned long ms);
 void updateMAX30100();
+int16_t redSampleLast();
 void updateOLED();
 void checkBattery();
 void checkTemperature();
@@ -168,6 +182,14 @@ constexpr unsigned long MIN_PEAK_INTERVAL = 250;
 constexpr unsigned long MAX_PEAK_INTERVAL = 2000;
 constexpr int HEART_RATE_MIN = 40;
 constexpr int HEART_RATE_MAX = 180;
+// Probe/tissue contact is declared when the slow-moving IR DC baseline rises above
+// this many raw ADC counts over the no-contact resting level. TUNE THIS ON YOUR
+// HARDWARE: print irBaseline over serial with the probe on and off the tooth and
+// pick a threshold roughly halfway between the two. Starting guess only.
+constexpr int32_t PROBE_CONTACT_THRESHOLD = 300;
+// IR AC amplitude (peak-to-peak, from the buffer) below which we treat the channel
+// as noise floor rather than a real pulsatile signal.
+constexpr int16_t MIN_VALID_AC_AMPLITUDE = PEAK_THRESHOLD_MIN;
 
 // Calibration Constants (stored in Preferences)
 // Using proper calibrated pulse oximetry curve
@@ -217,7 +239,7 @@ enum DeviceState {
 // Hardware
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 Preferences preferences;
-PulseOximeter pox;
+MAX30100 sensor;  // Low-level raw driver — see include comment above
 
 // Network
 WebServer server(80);
@@ -258,7 +280,8 @@ unsigned long pairCodeGenerated = 0;
 constexpr unsigned long PAIR_CODE_TIMEOUT = 300000; // 5 minutes
 
 // Sensors
-// PulseOximeter library handles most calculations
+// Derived from our own raw-sample AC/DC pipeline in updateMAX30100() — see that
+// function's comments. NOT from the PulseOximeter library's finger-tuned algorithm.
 float heartRate = 0.0;
 float spo2 = 0.0;
 bool beatDetected = false;
@@ -276,7 +299,7 @@ float vitalityIndex = 0.0;
 String vitalityStatus = "";
 String probeQuality = "";
 
-// Raw sensor values (not directly available in PulseOximeter library)
+// Raw sensor values — real DC baseline / AC amplitude from the low-level driver
 uint32_t redRaw = 0;
 uint32_t irRaw = 0;
 uint32_t redFiltered = 0;
@@ -292,19 +315,21 @@ void onBeatDetected() {
   Serial.println("BEAT");
 }
 
-// OLD SIGNAL PROCESSING VARIABLES - NO LONGER USED
-// Kept for reference but not used with PulseOximeter library
-int16_t redBuffer[FILTER_BUFFER_SIZE] = {0};
-int16_t irBuffer[FILTER_BUFFER_SIZE] = {0};
+// SIGNAL PROCESSING VARIABLES — actively used by updateMAX30100()'s AC/DC +
+// peak-detection pipeline (previously dormant while the PulseOximeter library
+// was in use; now driving the real sensor values below)
+// Changed to int32_t to prevent integer overflow with large DC values
+int32_t redBuffer[FILTER_BUFFER_SIZE] = {0};
+int32_t irBuffer[FILTER_BUFFER_SIZE] = {0};
 int bufferIndex = 0;
-int16_t redLowPass = 0;
-int16_t irLowPass = 0;
-int16_t redBaseline = 0;
-int16_t irBaseline = 0;
+int32_t redLowPass = 0;
+int32_t irLowPass = 0;
+int32_t redBaseline = 0;
+int32_t irBaseline = 0;
 unsigned long peakTimes[10] = {0};
 int peakCount = 0;
 unsigned long lastPeakTime = 0;
-int16_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
+int32_t adaptiveThreshold = PEAK_THRESHOLD_MIN;
 bool pulseDetected = false;
 float redAC = 0.0;
 float redDC = 0.0;
@@ -741,11 +766,11 @@ void initializeMAX30100() {
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.setClock(100000); // Set stable 100kHz I2C clock
   
-  // Initialize the PulseOximeter
-  Serial.println(F("Calling pox.begin()..."));
-  bool initSuccess = pox.begin();
+  // Initialize the low-level MAX30100 driver
+  Serial.println(F("Calling sensor.begin()..."));
+  bool initSuccess = sensor.begin();
   
-  Serial.print(F("pox.begin() result: "));
+  Serial.print(F("sensor.begin() result: "));
   Serial.println(initSuccess ? "SUCCESS" : "FAILED");
   
   if (!initSuccess) {
@@ -754,15 +779,27 @@ void initializeMAX30100() {
     return;
   }
   
-  // Configure the sensor using working configuration
-  Serial.println(F("Setting IR LED current to 7.6 mA..."));
-  pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+  // Configure the sensor. NOTE: we deliberately do NOT call setLedsPulseWidth(),
+  // setSamplingRate(), or setHighresModeEnabled() here — sensor.begin() already
+  // applies safe internal defaults (100Hz, 16-bit/1600us pulse width) for those,
+  // and a prior version of this code that explicitly overrode them stalled the
+  // FIFO entirely (getRawValues() returned false forever, i.e. samples=0). Only
+  // mode and LED current are overridden, mirroring the known-working
+  // finger-test configuration on this exact board.
+  //
+  // We use a HIGHER LED current than the typical fingertip default (7.6mA)
+  // because the dental probe's optical path (through tooth/gum tissue with an
+  // air gap and diffuser) attenuates far more light than a fingertip pressed
+  // directly on the sensor window. Start at 24mA and raise it (up to
+  // MAX30100_LED_CURR_50MA) if irBaseline stays too low with the probe on the
+  // tooth, or lower it if the channel saturates (near 65535 raw counts).
+  Serial.println(F("Configuring MAX30100 for dental-probe signal levels..."));
+  sensor.setMode(MAX30100_MODE_SPO2_HR); // need both LEDs active, not just IR (HRONLY default)
+  sensor.setLedsCurrent(MAX30100_LED_CURR_24MA, MAX30100_LED_CURR_24MA);
+  sensor.resetFifo(); // start from a known-good FIFO pointer state
   
-  Serial.println(F("Setting beat detection callback..."));
-  pox.setOnBeatDetectedCallback(onBeatDetected);
-  
-  Serial.println(F("MAX30100 OK - IR LED = 7.6 mA"));
-  Serial.println(F("Ready for finger placement"));
+  Serial.println(F("MAX30100 OK - IR/RED LED = 24 mA (sampling rate/pulse width at driver defaults)"));
+  Serial.println(F("Ready for probe placement"));
 }
 
 // ============================================================
@@ -1625,7 +1662,9 @@ void runTestSampling() {
 }
 
 // ============================================================
-// UPDATE MAX30100 - Read sensor data using PulseOximeter
+// UPDATE MAX30100 - Read RAW samples and run our own AC/DC +
+// peak-detection pipeline (tuned for weak dental-probe signals,
+// not the fingertip-tuned PulseOximeter beat detector)
 // ============================================================
 void updateMAX30100() {
   // Only update sensor if it's been initialized to prevent crashes
@@ -1633,108 +1672,232 @@ void updateMAX30100() {
     return; // Skip sensor updates before initialization
   }
   
-  // IMPORTANT: Must run continuously
-  pox.update();
+  // IMPORTANT: Must run continuously to keep the sensor's FIFO from overflowing
+  sensor.update();
   
-  // Get heart rate and SpO2 from library
-  float bpm = pox.getHeartRate();
-  float spo2_reading = pox.getSpO2();
-  
-  // Debug sensor readings every 5 seconds
   static unsigned long lastSensorDebug = 0;
-  static unsigned long updateCount = 0;
-  updateCount++;
+  static unsigned long samplesThisWindow = 0;
+  static int32_t prevIrLowPass = 0;
+  static bool rising = false;
+  static unsigned long lastSampleSeen = 0; // for stuck-FIFO recovery, see below
+  static unsigned long lastBaselineChange = 0; // Track baseline stability
+  static int32_t lastIrBaseline = 0;
   
-  if (millis() - lastSensorDebug >= 5000) {
-    lastSensorDebug = millis();
-    Serial.print(F("SENSOR UPDATE: Count="));
-    Serial.print(updateCount);
-    Serial.print(F(" BPM="));
-    Serial.print(bpm);
-    Serial.print(F(" SpO2="));
-    Serial.print(spo2_reading);
+  uint16_t irValue, redValue;
+  bool gotAnySample = false;
+  while (sensor.getRawValues(&irValue, &redValue)) {
+    gotAnySample = true;
+    samplesThisWindow++;
+    unsigned long now = millis();
     
-    bool bpmValid = (bpm >= 30 && bpm <= 220 && bpm > 0);
-    bool spo2Valid = (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0);
+    // --- Saturation check (probe pressed too hard / LED current too high) ---
+    sensorSaturated = (irValue >= 65000 || redValue >= 65000);
     
-    Serial.print(F(" Valid: "));
-    Serial.print(bpmValid ? "HR_OK" : "HR_ERR");
-    Serial.print(F(" "));
-    Serial.println(spo2Valid ? "SPO2_OK" : "SPO2_ERR");
+    // --- DC (baseline) tracking: slow exponential moving average ---
+    irBaseline = irBaseline + (int16_t)(((int32_t)irValue - irBaseline) * LOW_PASS_ALPHA);
+    redBaseline = redBaseline + (int16_t)(((int32_t)redValue - redBaseline) * LOW_PASS_ALPHA);
     
-    updateCount = 0; // Reset counter
+    // --- AC (pulsatile) component = raw sample minus its own DC baseline ---
+    // Use int32_t to prevent overflow with large DC values (e.g., 28,591)
+    int32_t irSample = (int32_t)irValue - (int32_t)irBaseline;
+    int32_t redSample = (int32_t)redValue - (int32_t)redBaseline;
+    
+    // Store into the circular buffers so we can measure peak-to-peak amplitude
+    irBuffer[bufferIndex] = irSample;
+    redBuffer[bufferIndex] = redSample;
+    bufferIndex = (bufferIndex + 1) % FILTER_BUFFER_SIZE;
+    
+    // Light smoothing on the IR AC channel, used only for peak (beat) detection
+    irLowPass = irLowPass + (int16_t)((irSample - irLowPass) * 0.3f);
+    
+    // --- Peak detection on the smoothed IR AC signal ---
+    if (irLowPass > adaptiveThreshold && !rising && (now - lastPeakTime) > MIN_PEAK_INTERVAL) {
+      rising = true;
+    }
+    if (rising && irLowPass < prevIrLowPass) {
+      rising = false;
+      if (lastPeakTime > 0) {
+        unsigned long interval = now - lastPeakTime;
+        if (interval >= MIN_PEAK_INTERVAL && interval <= MAX_PEAK_INTERVAL) {
+          float bpm = 60000.0f / interval;
+          if (bpm >= HEART_RATE_MIN && bpm <= HEART_RATE_MAX) {
+            // Exponential smoothing so a single noisy interval doesn't jump the reading
+            heartRate = (heartRate == 0) ? bpm : (heartRate * 0.7f + bpm * 0.3f);
+            pulseDetected = true;
+            beatDetected = true;
+            onBeatDetected();
+          }
+        }
+      }
+      lastPeakTime = now;
+    }
+    prevIrLowPass = irLowPass;
   }
   
-  // Validate and update values - NO DEMO for HR and SpO2
-  bool previousHR = heartRate;
-  bool previousSpO2 = spo2;
+  // --- Stuck-FIFO recovery ---
+  // This library's FIFO is only 16 samples deep (~160ms at 100Hz). If a loop
+  // iteration blocks longer than that (MQTT/TLS publish, OLED I2C write, WiFi
+  // handling), the FIFO can overflow and the driver's internal read/write
+  // pointer math can get stuck reporting "0 samples available" permanently,
+  // even though the sensor is still physically running. There's no built-in
+  // recovery for this in the library, so we force one: if we haven't seen a
+  // single sample in over 2 seconds (should never happen normally — we'd see
+  // ~100/sec), reset the FIFO to resync the pointers.
+  unsigned long now2 = millis();
+  if (gotAnySample) {
+    lastSampleSeen = now2;
+  } else if (lastSampleSeen != 0 && (now2 - lastSampleSeen) > 2000) {
+    Serial.println(F("WARNING: MAX30100 FIFO appears stuck (no samples for 2s) - resetting FIFO"));
+    sensor.resetFifo();
+    lastSampleSeen = now2; // avoid resetting again next call before it recovers
+  } else if (lastSampleSeen == 0) {
+    lastSampleSeen = now2; // first call after boot, start the clock
+  }
   
-  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
-    heartRate = bpm;
+  // --- Probe/tissue contact detection from the IR DC baseline ---
+  // With nothing on the sensor, IR DC sits near the ambient noise floor.
+  // Real tissue contact raises it well above PROBE_CONTACT_THRESHOLD.
+  probeOnTooth = (irBaseline > PROBE_CONTACT_THRESHOLD);
+  fingerDetected = probeOnTooth;
+  if (!fingerDetected) probeDetectedTime = 0;
+  else if (probeDetectedTime == 0) probeDetectedTime = millis();
+  
+  // Expose raw DC levels for telemetry/OLED (these are now REAL sensor values,
+  // not the old hardcoded 50000/60000 placeholders)
+  redRaw = (uint32_t)max((int16_t)0, redBaseline);
+  irRaw = (uint32_t)max((int16_t)0, irBaseline);
+  
+  // --- Baseline stability tracking ---
+  // Only use AC calculations if baseline has been stable
+  if (abs(irBaseline - lastIrBaseline) > 100) {
+    lastBaselineChange = millis();
+    lastIrBaseline = irBaseline;
+  }
+  bool baselineStable = (millis() - lastBaselineChange) > 2000;
+  
+  // --- Baseline stability tracking ---
+  // Only use AC calculations if baseline has been stable
+  if (abs(irBaseline - lastIrBaseline) > 100) {
+    lastBaselineChange = millis();
+    lastIrBaseline = irBaseline;
+  }
+  bool baselineStable = (millis() - lastBaselineChange) > 2000;
+  
+  // --- Baseline stability tracking ---
+  // Only use AC calculations if baseline has been stable
+  if (abs(irBaseline - lastIrBaseline) > 100) {
+    lastBaselineChange = millis();
+    lastIrBaseline = irBaseline;
+  }
+  bool baselineStable = (millis() - lastBaselineChange) > 2000;
+  
+  // --- Peak-to-peak AC amplitude over the buffer window, for SpO2 estimate + quality ---
+  // Use int32_t for min/max to prevent overflow, and add outlier filtering
+  int32_t irMax = -32768, irMin = 32767, redMax = -32768, redMin = 32767;
+  int localValidSamples = 0; // Local variable for this calculation
+  
+  for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
+    // Skip extreme outliers that indicate buffer initialization issues or overflow
+    if (abs(irBuffer[i]) < 10000 && abs(redBuffer[i]) < 10000) {
+      if (irBuffer[i] > irMax) irMax = irBuffer[i];
+      if (irBuffer[i] < irMin) irMin = irBuffer[i];
+      if (redBuffer[i] > redMax) redMax = redBuffer[i];
+      if (redBuffer[i] < redMin) redMin = redBuffer[i];
+      localValidSamples++;
+    }
+  }
+  
+  // Only calculate AC amplitude if we have enough valid samples in buffer AND baseline is stable
+  if (localValidSamples >= FILTER_BUFFER_SIZE * 0.7 && baselineStable) {
+    irAC = (float)(irMax - irMin);
+    redAC = (float)(redMax - redMin);
   } else {
-    heartRate = 0; // Use real sensor only, no demo
+    // Not enough valid data or baseline unstable - zero out to prevent corruption
+    irAC = 0;
+    redAC = 0;
   }
   
-  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
-    spo2 = spo2_reading;
+  irDC = (float)irBaseline;
+  redDC = (float)redBaseline;
+  redFiltered = (uint32_t)abs(redSampleLast());
+  irFiltered = (uint32_t)abs(irLowPass);
+  
+  // Calculate noise level with proper range checking
+  noiseLevel = 100.0f - constrain((float)irAC, 0.0f, (float)PEAK_THRESHOLD_MAX) * (100.0f / (float)PEAK_THRESHOLD_MAX);
+  
+  bool hasValidSignal = fingerDetected && irAC > MIN_VALID_AC_AMPLITUDE
+                        && irDC > 0 && redDC > 0 && !sensorSaturated;
+  
+  if (hasValidSignal) {
+    // Classic simplified ratio-of-ratios formula. NOTE: this is NOT a clinically
+    // calibrated SpO2 (that calibration is empirical and finger-specific in the
+    // library we removed) — treat it as a relative perfusion/oxygenation trend
+    // indicator for the dental signal, not an absolute blood-oxygen percentage.
+    float R = (redAC / (float)redDC) / (irAC / (float)irDC);
+    float spo2Estimate = 110.0f - 25.0f * R;
+    spo2 = constrain(spo2Estimate, 0.0f, 100.0f);
+    
+    // Signal quality scales with AC amplitude (stronger pulsatile signal = higher quality)
+    signalQuality = constrain(
+      (float)(irAC - MIN_VALID_AC_AMPLITUDE) * (100.0f / (PEAK_THRESHOLD_MAX - MIN_VALID_AC_AMPLITUDE)),
+      0.0f, 100.0f);
   } else {
-    spo2 = 0; // Use real sensor only, no demo
+    spo2 = 0;
+    heartRate = 0;
+    signalQuality = 0;
+    pulseDetected = false;
   }
   
-  // Alert when values change from 0 to something
-  if (previousHR == 0 && heartRate > 0) {
-    Serial.print(F("ALERT: Heart rate detected! HR="));
-    Serial.println(heartRate);
-  }
-  if (previousSpO2 == 0 && spo2 > 0) {
-    Serial.print(F("ALERT: SpO2 detected! SpO2="));
-    Serial.println(spo2);
-  }
-  
-  // Update finger detection based on valid readings
-  fingerDetected = (heartRate > 0 || spo2 > 0);
-  
-  // Update raw values (simulated since library doesn't provide direct access)
-  redRaw = heartRate > 0 ? 50000 : 0;
-  irRaw = spo2 > 0 ? 60000 : 0;
-  redFiltered = redRaw;
-  irFiltered = irRaw;
-  
-  // Calculate signal quality based on beat detection
-  if (beatDetected) {
-    signalQuality = min(signalQuality + 5.0f, 100.0f);
-  } else {
-    signalQuality = max(signalQuality - 2.0f, 0.0f);
-  }
-  
-  // Ensure signal quality has a reasonable value
-  if (signalQuality < 30) {
-    signalQuality = 85.0;
-  }
-  
-  // Calculate vitality index based on signal quality and readings
+  // --- Vitality index (unchanged formula, now driven by real signal quality/spo2/HR) ---
   if (heartRate > 0 && spo2 > 0) {
     vitalityIndex = (signalQuality * 0.6f) + (spo2 * 0.2f) + ((heartRate > 60 && heartRate < 100) ? 20.0f : 0.0f);
     vitalityStatus = vitalityIndex > 70 ? "Strong Vitality" : vitalityIndex > 40 ? "Moderate Vitality" : "Weak Vitality";
   } else {
     vitalityIndex = 0;
-    vitalityStatus = "No Detectable Vitality";
+    vitalityStatus = fingerDetected ? "No Detectable Vitality" : "No Probe Contact";
   }
   
   probeQuality = signalQuality > 70 ? "Good" : signalQuality > 40 ? "Fair" : "Poor";
   
-  // Debug final values every 5 seconds
+  // Debug sensor readings every 5 seconds — THIS is what you should watch while
+  // calibrating PROBE_CONTACT_THRESHOLD and the LED current on real hardware.
   if (millis() - lastSensorDebug >= 5000) {
-    Serial.print(F("Final: HR="));
+    lastSensorDebug = millis();
+    Serial.print(F("RAW: samples="));
+    Serial.print(samplesThisWindow);
+    Serial.print(F(" irDC="));
+    Serial.print(irDC);
+    Serial.print(F(" redDC="));
+    Serial.print(redDC);
+    Serial.print(F(" irAC(p-p)="));
+    Serial.print(irAC);
+    Serial.print(F(" redAC(p-p)="));
+    Serial.print(redAC);
+    Serial.print(F(" contact="));
+    Serial.print(fingerDetected ? "YES" : "NO");
+    Serial.print(F(" saturated="));
+    Serial.println(sensorSaturated ? "YES" : "NO");
+    
+    Serial.print(F("Derived: HR="));
     Serial.print(heartRate);
     Serial.print(F(" SpO2="));
     Serial.print(spo2);
-    Serial.print(F(" Temp="));
-    Serial.println(temperature, 1);
+    Serial.print(F(" Quality="));
+    Serial.print(signalQuality);
+    Serial.print(F(" Vitality="));
+    Serial.println(vitalityIndex);
+    
+    samplesThisWindow = 0;
   }
   
-  // Reset beat detection flag
+  // Reset beat detection flag (consumed by callers between updates)
   beatDetected = false;
+}
+
+// Small helper: last raw AC sample written into the RED buffer, for display filtering
+int16_t redSampleLast() {
+  int lastIdx = (bufferIndex - 1 + FILTER_BUFFER_SIZE) % FILTER_BUFFER_SIZE;
+  return redBuffer[lastIdx];
 }
 
 // ============================================================
@@ -1750,77 +1913,46 @@ void sensorSafeDelay(unsigned long ms) {
 }
 
 // ============================================================
-// PROCESS SIGNALS - Simplified for PulseOximeter library
+// PROCESS SIGNALS - unused stub, kept for interface compatibility
 // ============================================================
 void processSignals() {
-  // PulseOximeter library handles all signal processing
-  // This function is kept for compatibility but does nothing
-  // All calculations are done in updateMAX30100()
+  // All AC/DC extraction, filtering, and peak detection now happens inline
+  // inside updateMAX30100(). This stub is kept only so any external caller
+  // referencing it doesn't break the build.
 }
 
 // ============================================================
-// OLD SIGNAL PROCESSING FUNCTIONS - NO LONGER USED
+// UNUSED STUB FUNCTIONS - kept for interface compatibility only
 // ============================================================
-// The following functions are no longer needed as the PulseOximeter library
-// handles all signal processing, heart rate detection, and SpO2 calculation.
-// Kept for reference but not called in the main code.
+// updateMAX30100() now does its own filtering, baseline tracking, peak
+// detection, and vitality/quality scoring inline. These stubs are not called
+// anywhere in the current firmware; safe to delete once you're sure nothing
+// external references them.
 
-// ============================================================
-// MEDIAN FILTER
-// ============================================================
 int16_t medianFilter(int16_t* buffer, int size) {
-  // Not used - PulseOximeter handles filtering
   return 0;
 }
 
-// ============================================================
-// BASELINE CORRECTION
-// ============================================================
 void updateBaseline() {
-  // Not used - PulseOximeter handles baseline correction
 }
 
-// ============================================================
-// OUTLIER REJECTION
-// ============================================================
 int16_t rejectOutliers(int16_t value, int16_t* buffer, int size) {
-  // Not used - PulseOximeter handles outlier rejection
   return value;
 }
 
-// ============================================================
-// CALCULATE HEART RATE
-// ============================================================
 void calculateHeartRate() {
-  // Not used - PulseOximeter handles heart rate detection
 }
 
-// ============================================================
-// CALCULATE SpO2
-// ============================================================
 void calculateSpO2() {
-  // Not used - PulseOximeter handles SpO2 calculation
 }
 
-// ============================================================
-// CALCULATE SIGNAL QUALITY
-// ============================================================
 void calculateSignalQuality() {
-  // Not used - Signal quality calculated in updateMAX30100()
 }
 
-// ============================================================
-// CALCULATE PROBE QUALITY
-// ============================================================
 void calculateProbeQuality() {
-  // Not used - Probe quality calculated in updateMAX30100()
 }
 
-// ============================================================
-// CALCULATE VITALITY INDEX
-// ============================================================
 void calculateVitalityIndex() {
-  // Not used - Vitality index calculated in updateMAX30100()
 }
 
 // ============================================================
