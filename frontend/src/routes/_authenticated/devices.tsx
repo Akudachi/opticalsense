@@ -31,7 +31,11 @@ export const Route = createFileRoute("/_authenticated/devices")({
 function DevicesPage() {
   const services = getServices();
   const qc = useQueryClient();
-  const { data: devices = [] } = useQuery({ queryKey: ["devices"], queryFn: () => services.devices.list() });
+  const { data: devices = [] } = useQuery({
+    queryKey: ["devices"],
+    queryFn: () => services.devices.list(),
+    refetchInterval: 3000, // Refresh every 3 seconds to pick up online/offline status changes
+  });
   const [pairOpen, setPairOpen] = useState(false);
 
   const refreshMut = useMutation({
