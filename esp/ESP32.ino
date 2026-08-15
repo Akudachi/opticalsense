@@ -481,6 +481,7 @@ void loop() {
   // Heartbeat
   if (mqttConnected && currentMillis - lastHeartbeat >= HEARTBEAT_INTERVAL) {
     publishHeartbeat();
+    publishStatus(getStateString());
     // Re-publish pairing code regularly so website can find it
     if (!isPaired) {
       publishPairRequest();
@@ -513,8 +514,8 @@ void loop() {
     runDiagnosticSampling();
   }
   
-  // Small delay to prevent watchdog issues
-  delay(5);
+  // Yield to background ESP32 tasks
+  yield();
 }
 
 // ============================================================
@@ -671,10 +672,16 @@ void initializeOLED() {
 // MAX30100 INITIALIZATION - GY-MAX3010x Sensor with PulseOximeter
 // ============================================================
 void initializeMAX30100() {
+  Serial.println(F("=== STEP 0: SENSOR INITIALIZATION ==="));
   Serial.println(F("Initializing GY-MAX3010x..."));
   
   // Initialize the PulseOximeter
-  if (!pox.begin()) {
+  bool initSuccess = pox.begin();
+  
+  Serial.print(F("MAX30100 Init Result: "));
+  Serial.println(initSuccess ? "SUCCESS" : "FAILED");
+  
+  if (!initSuccess) {
     Serial.println(F("MAX30100 initialization failed! Using demo values only."));
     // Don't set error state, continue with demo values
     currentState = STATE_READY;
@@ -688,6 +695,7 @@ void initializeMAX30100() {
   Serial.println(F("MAX30100 Initialized Successfully"));
   Serial.println(F("IR LED = 7.6 mA"));
   Serial.println(F("PLACE FINGER"));
+  Serial.println(F("======================================"));
 }
 
 // ============================================================
@@ -1243,7 +1251,8 @@ void handleCommand() {
   } else if (command == "ping") {
     handlePing();
   } else if (command == "get_status") {
-    publishStatus("ready");
+    publishStatus(getStateString());
+    publishHeartbeat();
   } else {
     Serial.println(F("Unknown Command"));
   }
@@ -1557,33 +1566,61 @@ void updateMAX30100() {
   float bpm = pox.getHeartRate();
   float spo2_reading = pox.getSpO2();
   
-  // Debug sensor readings
+  // STEP 1: Debug raw sensor readings
   static unsigned long lastSensorDebug = 0;
   if (millis() - lastSensorDebug >= 5000) {
     lastSensorDebug = millis();
-    Serial.print(F("Sensor Readings - BPM: "));
+    Serial.println(F("=== STEP 1: RAW SENSOR READINGS ==="));
+    Serial.print(F("BPM: "));
     Serial.print(bpm);
     Serial.print(F(" | SpO2: "));
-    Serial.print(spo2_reading);
-    Serial.print(F(" | Valid HR: "));
-    Serial.print((bpm >= 30 && bpm <= 220 && bpm > 0) ? "YES" : "NO");
-    Serial.print(F(" | Valid SpO2: "));
-    Serial.println((spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) ? "YES" : "NO");
+    Serial.println(spo2_reading);
   }
   
-  // Use real sensor values when valid, otherwise keep last known values
-  if (bpm >= 30 && bpm <= 220 && bpm > 0) {
+  // STEP 2: Validate sensor readings
+  bool bpmValid = (bpm >= 30 && bpm <= 220 && bpm > 0);
+  bool spo2Valid = (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0);
+  
+  if (millis() - lastSensorDebug >= 5000) {
+    Serial.println(F("=== STEP 2: VALIDATION CHECK ==="));
+    Serial.print(F("BPM Valid: "));
+    Serial.println(bpmValid ? "YES" : "NO");
+    Serial.print(F("SpO2 Valid: "));
+    Serial.println(spo2Valid ? "YES" : "NO");
+  }
+  
+  // STEP 3: Update heartRate
+  if (bpmValid) {
     heartRate = bpm;
   } else if (heartRate == 0) {
-    // If still 0 and no valid reading, use demo value to show something
+    // If still 0 and no valid reading, use demo value
     heartRate = 75.0;
+    if (millis() - lastSensorDebug >= 5000) {
+      Serial.println(F("=== STEP 3: USING DEMO HR ==="));
+      Serial.println(F("Heart Rate set to 75.0 (demo)"));
+    }
   }
   
-  if (spo2_reading >= 70 && spo2_reading <= 100 && spo2_reading > 0) {
+  // STEP 4: Update spo2
+  if (spo2Valid) {
     spo2 = spo2_reading;
   } else if (spo2 == 0) {
-    // If still 0 and no valid reading, use demo value to show something
+    // If still 0 and no valid reading, use demo value
     spo2 = 98.0;
+    if (millis() - lastSensorDebug >= 5000) {
+      Serial.println(F("=== STEP 4: USING DEMO SpO2 ==="));
+      Serial.println(F("SpO2 set to 98.0 (demo)"));
+    }
+  }
+  
+  // STEP 5: Debug final values
+  if (millis() - lastSensorDebug >= 5000) {
+    Serial.println(F("=== STEP 5: FINAL VALUES ==="));
+    Serial.print(F("heartRate: "));
+    Serial.println(heartRate);
+    Serial.print(F("spo2: "));
+    Serial.println(spo2);
+    Serial.println(F("=================================="));
   }
   
   // Update finger detection based on valid readings
@@ -2223,7 +2260,7 @@ void publishTelemetry() {
   serializeJson(jsonDoc, mqttPayload);
   sprintf(mqttTopic, TOPIC_TELEMETRY, deviceId.c_str());
   
-  Serial.println(F("=== TELEMETRY PUBLISH ==="));
+  Serial.println(F("=== STEP 6: TELEMETRY SEND ==="));
   Serial.print(F("Device ID: "));
   Serial.println(deviceId);
   Serial.print(F("Topic: "));
