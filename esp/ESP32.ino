@@ -1223,19 +1223,25 @@ void connectMQTT() {
   mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(2048); // Increase buffer size for larger payloads
-  
-  // Prepare Last Will message
+
+  // Prepare Last Will message as JSON for backend compatibility
   sprintf(mqttTopic, TOPIC_STATUS, deviceId.c_str());
-  const char* willMessage = "Device Offline";
-  
+  jsonDoc.clear();
+  jsonDoc["deviceId"] = deviceId;
+  jsonDoc["status"] = "offline";
+  jsonDoc["online"] = false;
+  jsonDoc["timestamp"] = millis();
+  serializeJson(jsonDoc, mqttPayload);
+  const char* willMessage = mqttPayload;
+
   int attempts = 0;
   while (!mqttClient.connected() && attempts < 10) {
     // Feed watchdog to prevent timeout during long MQTT connection
     esp_task_wdt_reset();
-    
+
     // Connect with Last Will, Clean Session = False
     if (mqttClient.connect(deviceId.c_str(), mqttUsername.c_str(), mqttPassword.c_str(),
-                          mqttTopic, MQTT_QOS, false, willMessage, false)) {
+                          mqttTopic, MQTT_QOS, true, willMessage, false)) {
       Serial.println(F("MQTT Connected"));
       mqttConnected = true;
       
@@ -2489,12 +2495,13 @@ void publishStatus(String status) {
   jsonDoc.clear();
   jsonDoc["deviceId"] = deviceId;
   jsonDoc["status"] = status;
+  jsonDoc["online"] = (status == "online");
   jsonDoc["battery"] = batteryPercent;
   jsonDoc["voltage"] = batteryVoltage;
   jsonDoc["wifi"] = WiFi.RSSI();
   jsonDoc["mqtt"] = mqttConnected ? "CONNECTED" : "DISCONNECTED";
   jsonDoc["timestamp"] = millis();
-  
+
   serializeJson(jsonDoc, mqttPayload);
   sprintf(mqttTopic, TOPIC_STATUS, deviceId.c_str());
   mqttClient.publish(mqttTopic, mqttPayload, true);
