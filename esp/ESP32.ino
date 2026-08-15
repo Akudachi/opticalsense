@@ -60,14 +60,7 @@
 // ============================================================
 // SENSOR SAFE DELAY - Non-blocking delay wrapper
 // ============================================================
-void sensorSafeDelay(unsigned long ms) {
-  unsigned long start = millis();
-  while (millis() - start < ms) {
-    // Only update sensor if it's been initialized to prevent crashes
-    updateMAX30100(); // Use the wrapper function that checks initialization
-    delay(1); // Small delay to prevent watchdog issues
-  }
-}
+void sensorSafeDelay(unsigned long ms);
 
 // ============================================================
 // FUNCTION DECLARATIONS
@@ -1742,6 +1735,18 @@ void updateMAX30100() {
   
   // Reset beat detection flag
   beatDetected = false;
+}
+
+// ============================================================
+// SENSOR SAFE DELAY - Non-blocking delay wrapper implementation
+// ============================================================
+void sensorSafeDelay(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    // Only update sensor if it's been initialized to prevent crashes
+    updateMAX30100(); // Use the wrapper function that checks initialization
+    delay(1); // Small delay to prevent watchdog issues
+  }
 }
 
 // ============================================================
