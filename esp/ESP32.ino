@@ -1,10 +1,15 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.5.0
+ * Version: 3.5.1
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.5.1:
+ * - Fixed access point not opening due to preferences.end() closing NVS
+ * - Removed duplicate handlePhysicalButtons() call in loop()
+ * - AP mode now works correctly when WiFi credentials are cleared
  * 
  * Changes in v3.5.0:
  * - Ultra-aggressive SpO2 smoothing (98/2) to prevent value jumping
@@ -117,7 +122,7 @@ void handlePhysicalButtons();
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.5.0";
+constexpr char FIRMWARE_VERSION[] = "3.5.1";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -510,9 +515,6 @@ void loop() {
   
   // Handle WiFi
   handleWiFi();
-  
-  // Handle physical buttons for device-initiated tests
-  handlePhysicalButtons();
   
   // Handle MQTT
   handleMQTT();
@@ -957,7 +959,7 @@ void connectWiFi() {
       wifiPassword = "";
       preferences.putString("ssid", "");
       preferences.putString("password", "");
-      preferences.end();
+      // Don't close preferences - keep it open for AP mode
       wifiRetryCount = 0;
       startAPMode();
     } else {
