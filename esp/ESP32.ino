@@ -1,10 +1,16 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.2.0
+ * Version: 3.3.0
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.3.0:
+ * - Added real LM35 temperature sensor reading on GPIO34
+ * - Removed demo temperature data, now reads actual sensor values
+ * - Temperature calibration support via preferences
+ * - Updates every 2 seconds for accurate readings
  * 
  * Changes in v3.2.0:
  * - Reverted from the MAX30100_PulseOximeter wrapper back to the low-level
@@ -31,7 +37,7 @@
  * - GY-MAX3010x SCL -> GPIO22
  * - GY-MAX3010x VCC -> 3.3V
  * - GY-MAX3010x GND -> GND
- * - LM35 -> GPIO34 (not used in demo mode)
+ * - LM35 -> GPIO34 (Temperature sensor)
  * - OLED SSD1306 -> I2C (0x3C)
  * 
  * Features:
@@ -39,7 +45,7 @@
  * - MQTT over TLS to HiveMQ Cloud
  * - Device Pairing with 6-digit code
  * - Optical Signal Acquisition (GY-MAX3010x with PulseOximeter library)
- * - Temperature Monitoring (Demo Data)
+ * - Temperature Monitoring (LM35 sensor on GPIO34)
  * - Battery Monitoring (Demo Data)
  * - OLED Display (SSD1306)
  * - Remote Command Handling
@@ -108,7 +114,7 @@ String getStateString();
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.1.0";
+constexpr char FIRMWARE_VERSION[] = "3.3.0";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -2118,21 +2124,31 @@ void checkBattery() {
 }
 
 // ============================================================
-// CHECK TEMPERATURE - Demo data only
+// CHECK TEMPERATURE - Read from LM35 sensor on GPIO 34
 // ============================================================
 void checkTemperature() {
   static unsigned long lastTempUpdate = 0;
-  static float demoTemperature = 36.6;
   
-  // Generate demo temperature data (36.0-37.5°C range with small variations)
-  if (millis() - lastTempUpdate > 5000) { // Update every 5 seconds for faster updates
-    demoTemperature = 36.0 + random(0, 16) / 10.0; // 36.0 to 37.5
+  // Read actual temperature from LM35 sensor
+  if (millis() - lastTempUpdate > 2000) { // Update every 2 seconds
+    int adcValue = analogRead(PIN_LM35);
+    
+    // LM35 outputs 10mV per degree Celsius
+    // ESP32 ADC is 12-bit (0-4095) for 0-3.3V range
+    // Temperature (°C) = (ADC_value * 3.3 / 4095) * 100
+    float voltage = (adcValue * 3.3) / 4095.0;
+    float rawTemp = voltage * 100.0;
+    
+    // Apply calibration if available
+    temperature = (rawTemp * tempCalibrationScale) + tempCalibrationOffset;
+    
     lastTempUpdate = millis();
     Serial.print(F("Temp: "));
-    Serial.println(demoTemperature, 1);
+    Serial.print(temperature, 1);
+    Serial.print(F("C (ADC: "));
+    Serial.print(adcValue);
+    Serial.println(F(")"));
   }
-  
-  temperature = demoTemperature;
 }
 
 // ============================================================
