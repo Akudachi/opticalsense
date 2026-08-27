@@ -1,32 +1,31 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.3.0
+ * Version: 3.5.0
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.5.0:
+ * - Ultra-aggressive SpO2 smoothing (98/2) to prevent value jumping
+ * - More aggressive BPM smoothing (90/10) for stability
+ * - Simplified OLED layout with single-column 4-row design
+ * - Added button state debugging for device test troubleshooting
+ * - MAX17043 battery demo values kept as requested
+ * 
+ * Changes in v3.4.0:
+ * - Added physical buttons for device-initiated tests (GPIO 4=START, GPIO 5=STOP)
+ * - Track test source (website vs device) in telemetry
+ * - Improved SpO2 smoothing (95/5) for better stability
+ * - Improved signal quality calculation based on SNR and DC stability
+ * - Compact OLED layout to fit all content properly
+ * - MAX17043 battery demo values kept as requested
  * 
  * Changes in v3.3.0:
  * - Added real LM35 temperature sensor reading on GPIO34
  * - Removed demo temperature data, now reads actual sensor values
  * - Temperature calibration support via preferences
  * - Updates every 2 seconds for accurate readings
- * 
- * Changes in v3.2.0:
- * - Reverted from the MAX30100_PulseOximeter wrapper back to the low-level
- *   MAX30100 raw-sample driver. The wrapper's beat detector and SpO2 calculator
- *   are tuned for a fingertip pressed on the sensor and never validated a beat
- *   against the much weaker dental-probe signal, so heartRate/spo2/redRaw/irRaw
- *   were permanently stuck at 0.
- * - Revived the AC/DC extraction + adaptive peak-detection pipeline in
- *   updateMAX30100() (buffers/constants for this already existed in the file
- *   but were dormant while the library was in use).
- * - redRaw/irRaw now report real DC baseline values from the sensor instead of
- *   hardcoded 50000/60000 placeholders.
- * - SpO2 is now an uncalibrated relative estimate (ratio-of-ratios formula) —
- *   treat it as a trend indicator for THIS probe, not a clinical SpO2 value.
- * - PROBE_CONTACT_THRESHOLD and the LED current need on-device calibration;
- *   watch the "RAW:" debug line over serial with probe on/off the tooth.
  * 
  * IMPORTANT: This firmware uses the low-level MAX30100 driver class (NOT
  * PulseOximeter). Install the same "MAX30100" library in Arduino IDE:
@@ -118,7 +117,7 @@ void handlePhysicalButtons();
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.3.0";
+constexpr char FIRMWARE_VERSION[] = "3.5.0";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -494,6 +493,9 @@ void loop() {
   
   // Feed Watchdog
   esp_task_wdt_reset();
+  
+  // Handle Physical Buttons (device test start/stop)
+  handlePhysicalButtons();
   
   // Handle State Machine
   handleState();
@@ -1691,17 +1693,33 @@ void handlePhysicalButtons() {
   bool startState = digitalRead(PIN_BUTTON_START);
   bool stopState = digitalRead(PIN_BUTTON_STOP);
   
+  // Debug button states occasionally
+  static unsigned long lastButtonDebug = 0;
+  if (millis() - lastButtonDebug >= 1000) {
+    lastButtonDebug = millis();
+    Serial.print(F("Buttons - Start: "));
+    Serial.print(startState == LOW ? "PRESSED" : "RELEASED");
+    Serial.print(F(" Stop: "));
+    Serial.println(stopState == LOW ? "PRESSED" : "RELEASED"));
+  }
+  
   // Start button pressed (falling edge)
   if (lastStartState == HIGH && startState == LOW) {
+    Serial.println(F("START button pressed!"));
     if (!testRunning) {
       startTest("device");
+    } else {
+      Serial.println(F("Test already running, ignoring start"));
     }
   }
   
   // Stop button pressed (falling edge)
   if (lastStopState == HIGH && stopState == LOW) {
+    Serial.println(F("STOP button pressed!"));
     if (testRunning) {
       stopTest();
+    } else {
+      Serial.println(F("Test not running, ignoring stop"));
     }
   }
   
@@ -1870,9 +1888,8 @@ void updateMAX30100() {
                 if (heartRate == 0) {
                   heartRate = medianBpm; // First reading
                 } else {
-                  // Adaptive smoothing: more smoothing for larger variations
-                  float smoothingFactor = (variation < 0.1) ? 0.8f : 0.6f;
-                  heartRate = heartRate * smoothingFactor + medianBpm * (1.0f - smoothingFactor);
+                  // More aggressive smoothing for stability
+                  heartRate = heartRate * 0.9f + medianBpm * 0.1f;
                 }
                 pulseDetected = true;
                 beatDetected = true;
@@ -1883,7 +1900,7 @@ void updateMAX30100() {
               if (heartRate == 0) {
                 heartRate = bpm;
               } else {
-                heartRate = heartRate * 0.8f + bpm * 0.2f;
+                heartRate = heartRate * 0.9f + bpm * 0.1f;
               }
               pulseDetected = true;
               beatDetected = true;
@@ -1999,12 +2016,26 @@ void updateMAX30100() {
     float spo2Estimate = (1.59584f * R * R) - (34.0657f * R) + 112.6898f;
     float newSpo2 = constrain(spo2Estimate, 0.0f, 100.0f);
     
-    // Aggressive smoothing for SpO2 to reduce fluctuations
+    // Ultra-aggressive smoothing for SpO2 to prevent jumping
     if (spo2 == 0) {
       spo2 = newSpo2; // First reading
     } else {
-      // 95/5 smoothing for SpO2 - even more aggressive for stability
-      spo2 = spo2 * 0.95f + newSpo2 * 0.05f;
+      // Outlier rejection: if new value differs by more than 10%, ignore it
+      float spo2Diff = abs(newSpo2 - spo2);
+      if (spo2Diff > 10.0f) {
+        // Skip this outlier reading
+        static unsigned long lastOutlierWarning = 0;
+        if (millis() - lastOutlierWarning >= 5000) {
+          lastOutlierWarning = millis();
+          Serial.print(F("SpO2 outlier rejected: "));
+          Serial.print(newSpo2, 1);
+          Serial.print(F(" vs current "));
+          Serial.println(spo2, 1);
+        }
+      } else {
+        // 98/2 smoothing for SpO2 - extremely aggressive for stability
+        spo2 = spo2 * 0.98f + newSpo2 * 0.02f;
+      }
       // Debug smoothing occasionally
       static unsigned long lastSmoothingDebug = 0;
       if (millis() - lastSmoothingDebug >= 10000) {
@@ -2357,13 +2388,13 @@ void updateOLED() {
       display.println(F("Enter on website"));
       break;
     case STATE_READY:
-      // Compact layout with smaller text
+      // Very simple 4-row layout
       display.setTextSize(1);
       display.setCursor(0, 0);
       display.println(F("READY"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
-      // Row 1: SpO2 and Temp
+      // Row 1: SpO2
       display.setCursor(0, 12);
       display.print(F("O2:"));
       if (spo2 >= 70 && spo2 <= 100) {
@@ -2372,12 +2403,8 @@ void updateOLED() {
       } else {
         display.print(F("--"));
       }
-      display.setCursor(64, 12);
-      display.print(F("T:"));
-      display.print(temperature, 1);
-      display.print(F("C"));
       
-      // Row 2: HR and Battery
+      // Row 2: HR
       display.setCursor(0, 22);
       display.print(F("HR:"));
       if (heartRate >= 30 && heartRate <= 220) {
@@ -2385,26 +2412,25 @@ void updateOLED() {
       } else {
         display.print(F("--"));
       }
-      display.setCursor(64, 22);
+      
+      // Row 3: Temp
+      display.setCursor(0, 32);
+      display.print(F("T:"));
+      display.print(temperature, 1);
+      display.print(F("C"));
+      
+      // Row 4: Battery
+      display.setCursor(0, 42);
       display.print(F("B:"));
       display.print((int)batteryPercent);
       display.print(F("%"));
-      
-      // Row 3: Vitality
-      display.setCursor(0, 32);
-      display.print(F("V:"));
-      display.print(vitalityStatus.substring(0, 6)); // Truncate to fit
-      
-      // Row 4: Source info
-      display.setCursor(0, 42);
-      display.print(F("Press btn/web"));
       break;
     case STATE_TESTING:
-      // Compact layout
+      // Simple 4-row layout
       display.setTextSize(1);
       display.setCursor(0, 0);
       display.print(F("TEST"));
-      display.print(testSource == "device" ? F("(D)") : F("(W)")); // D=device, W=website
+      display.print(testSource == "device" ? F("(D)") : F("(W)"));
       display.print(F(" "));
       {
         unsigned long testSec = (millis() - testStartTime) / 1000;
@@ -2415,7 +2441,7 @@ void updateOLED() {
       }
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
-      // Row 1: SpO2 and Temp
+      // Row 1: SpO2
       display.setCursor(0, 12);
       display.print(F("O2:"));
       if (spo2 >= 70 && spo2 <= 100) {
@@ -2424,12 +2450,8 @@ void updateOLED() {
       } else {
         display.print(F("--"));
       }
-      display.setCursor(64, 12);
-      display.print(F("T:"));
-      display.print(temperature, 1);
-      display.print(F("C"));
       
-      // Row 2: HR and Battery
+      // Row 2: HR
       display.setCursor(0, 22);
       display.print(F("HR:"));
       if (heartRate >= 30 && heartRate <= 220) {
@@ -2437,17 +2459,14 @@ void updateOLED() {
       } else {
         display.print(F("--"));
       }
-      display.setCursor(64, 22);
-      display.print(F("B:"));
-      display.print((int)batteryPercent);
-      display.print(F("%"));
       
-      // Row 3: Vitality
+      // Row 3: Temp
       display.setCursor(0, 32);
-      display.print(F("V:"));
-      display.print(vitalityStatus.substring(0, 6));
+      display.print(F("T:"));
+      display.print(temperature, 1);
+      display.print(F("C"));
       
-      // Row 4: Sample count
+      // Row 4: Samples
       display.setCursor(0, 42);
       display.print(F("S:"));
       display.print(sampleCount);
