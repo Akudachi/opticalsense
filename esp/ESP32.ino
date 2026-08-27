@@ -1,10 +1,25 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.5.1
+ * Version: 3.6.0
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.6.0:
+ * - WiFi timeout reduced to 10 seconds (from 15 seconds)
+ * - AP mode opens immediately after WiFi connection failure
+ * - SpO2 stability improved with median filter (5-sample buffer)
+ * - SpO2 uses 95/5 smoothing on median-filtered values
+ * - Single GPIO 4 button for START/STOP toggle (removed GPIO 5)
+ * - Button debouncing at 50ms interval
+ * - No independent SpO2 calculation on website - uses device values
+ * 
+ * Changes in v3.5.2:
+ * - AP mode now starts immediately on WiFi connection failure
+ * - Removed retry logic that was delaying AP mode opening
+ * - WiFi timeout reduced to 15 seconds for faster AP fallback
+ * - If WiFi fails, AP opens immediately without waiting for retries
  * 
  * Changes in v3.5.1:
  * - Fixed access point not opening due to preferences.end() closing NVS
@@ -116,13 +131,12 @@ void handlePhysicalButtons();
                               // Physically move the LM35 signal wire from GPIO 15 to GPIO 34
 #define PIN_I2C_SDA      21
 #define PIN_I2C_SCL      22
-#define PIN_BUTTON_START  4   // Device start test button
-#define PIN_BUTTON_STOP   5   // Device stop test button
+#define PIN_BUTTON_START  4   // Single button for START/STOP toggle
 
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.5.1";
+constexpr char FIRMWARE_VERSION[] = "3.6.0";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -354,6 +368,12 @@ float peakConsistency = 0.0;
 bool motionDetected = false;
 bool sensorSaturated = false;
 
+// SpO2 Stability - Median filter buffer
+constexpr int SPO2_BUFFER_SIZE = 5;
+float spo2Buffer[SPO2_BUFFER_SIZE] = {0};
+int spo2BufferIndex = 0;
+bool spo2BufferFilled = false;
+
 // Probe Detection
 bool probeOnTooth = false;         // true when photodiode signal indicates probe is on a tooth
 unsigned long probeDetectedTime = 0; // when probe was first detected (for "Analyzing" state)
@@ -421,9 +441,9 @@ void setup() {
   
   // Initialize Serial
   Serial.begin(115200);
-  Serial.println(F("\n=== OpticalSense ESP32 Firmware v2.0.0 ==="));
+  Serial.println(F("\n=== OpticalSense ESP32 Firmware ==="));
   Serial.print(F("Firmware Version: "));
-  Serial.println(firmwareVersion);
+  Serial.println(FIRMWARE_VERSION);
   
   // Initialize Watchdog
   // esp_task_wdt API is consistent across ESP32 Arduino Core 2.x and 3.x (ESP-IDF based)
@@ -599,7 +619,6 @@ void loop() {
 void initializeGPIO() {
   pinMode(PIN_LM35, INPUT);
   pinMode(PIN_BUTTON_START, INPUT_PULLUP);
-  pinMode(PIN_BUTTON_STOP, INPUT_PULLUP);
   
   Serial.println(F("GPIO Initialized"));
 }
@@ -933,7 +952,7 @@ void connectWiFi() {
   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
   
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) { // Increased attempts to 30 (15 seconds)
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10 seconds timeout (20 * 500ms)
     sensorSafeDelay(500);
     Serial.print(".");
     attempts++;
@@ -951,20 +970,14 @@ void connectWiFi() {
     Serial.print(F("WiFi Status: "));
     Serial.println(WiFi.status());
     
-    // If WiFi keeps failing, clear credentials and start AP mode
-    wifiRetryCount++;
-    if (wifiRetryCount >= 3) {
-      Serial.println(F("Too many WiFi failures - clearing credentials and starting AP mode"));
-      wifiSSID = "";
-      wifiPassword = "";
-      preferences.putString("ssid", "");
-      preferences.putString("password", "");
-      // Don't close preferences - keep it open for AP mode
-      wifiRetryCount = 0;
-      startAPMode();
-    } else {
-      Serial.println(F("Will retry in loop()"));
-    }
+    // If WiFi fails, immediately start AP mode instead of retrying
+    Serial.println(F("WiFi connection failed - Starting AP Mode immediately"));
+    wifiSSID = "";
+    wifiPassword = "";
+    preferences.putString("ssid", "");
+    preferences.putString("password", "");
+    wifiRetryCount = 0;
+    startAPMode();
   }
 }
 
@@ -1685,48 +1698,35 @@ void startTest(String source) {
 // ============================================================
 void handlePhysicalButtons() {
   static unsigned long lastButtonRead = 0;
-  static bool lastStartState = HIGH;
-  static bool lastStopState = HIGH;
+  static bool lastButtonState = HIGH;
   
-  // Read buttons every 50ms to debounce
+  // Read button every 50ms to debounce
   if (millis() - lastButtonRead < 50) return;
   lastButtonRead = millis();
   
-  bool startState = digitalRead(PIN_BUTTON_START);
-  bool stopState = digitalRead(PIN_BUTTON_STOP);
+  bool buttonState = digitalRead(PIN_BUTTON_START);
   
-  // Debug button states occasionally
+  // Debug button state occasionally
   static unsigned long lastButtonDebug = 0;
   if (millis() - lastButtonDebug >= 1000) {
     lastButtonDebug = millis();
-    Serial.print(F("Buttons - Start: "));
-    Serial.print(startState == LOW ? "PRESSED" : "RELEASED");
-    Serial.print(F(" Stop: "));
-    Serial.println(stopState == LOW ? "PRESSED" : "RELEASED"));
+    Serial.print(F("Button: "));
+    Serial.println(buttonState == LOW ? "PRESSED" : "RELEASED");
   }
   
-  // Start button pressed (falling edge)
-  if (lastStartState == HIGH && startState == LOW) {
-    Serial.println(F("START button pressed!"));
+  // Button pressed (falling edge) - toggle START/STOP
+  if (lastButtonState == HIGH && buttonState == LOW) {
+    Serial.println(F("Button pressed!"));
     if (!testRunning) {
+      Serial.println(F("Starting test (device)"));
       startTest("device");
     } else {
-      Serial.println(F("Test already running, ignoring start"));
-    }
-  }
-  
-  // Stop button pressed (falling edge)
-  if (lastStopState == HIGH && stopState == LOW) {
-    Serial.println(F("STOP button pressed!"));
-    if (testRunning) {
+      Serial.println(F("Stopping test"));
       stopTest();
-    } else {
-      Serial.println(F("Test not running, ignoring stop"));
     }
   }
   
-  lastStartState = startState;
-  lastStopState = stopState;
+  lastButtonState = buttonState;
 }
 
 // ============================================================
@@ -2018,37 +2018,48 @@ void updateMAX30100() {
     float spo2Estimate = (1.59584f * R * R) - (34.0657f * R) + 112.6898f;
     float newSpo2 = constrain(spo2Estimate, 0.0f, 100.0f);
     
-    // Ultra-aggressive smoothing for SpO2 to prevent jumping
-    if (spo2 == 0) {
-      spo2 = newSpo2; // First reading
-    } else {
-      // Outlier rejection: if new value differs by more than 10%, ignore it
-      float spo2Diff = abs(newSpo2 - spo2);
-      if (spo2Diff > 10.0f) {
-        // Skip this outlier reading
-        static unsigned long lastOutlierWarning = 0;
-        if (millis() - lastOutlierWarning >= 5000) {
-          lastOutlierWarning = millis();
-          Serial.print(F("SpO2 outlier rejected: "));
-          Serial.print(newSpo2, 1);
-          Serial.print(F(" vs current "));
-          Serial.println(spo2, 1);
+    // Add to median filter buffer
+    spo2Buffer[spo2BufferIndex] = newSpo2;
+    spo2BufferIndex = (spo2BufferIndex + 1) % SPO2_BUFFER_SIZE;
+    if (!spo2BufferFilled && spo2BufferIndex == 0) {
+      spo2BufferFilled = true;
+    }
+    
+    // Calculate median from buffer
+    float sortedBuffer[SPO2_BUFFER_SIZE];
+    memcpy(sortedBuffer, spo2Buffer, sizeof(spo2Buffer));
+    for (int i = 0; i < (spo2BufferFilled ? SPO2_BUFFER_SIZE : spo2BufferIndex); i++) {
+      for (int j = i + 1; j < (spo2BufferFilled ? SPO2_BUFFER_SIZE : spo2BufferIndex); j++) {
+        if (sortedBuffer[i] > sortedBuffer[j]) {
+          float temp = sortedBuffer[i];
+          sortedBuffer[i] = sortedBuffer[j];
+          sortedBuffer[j] = temp;
         }
-      } else {
-        // 98/2 smoothing for SpO2 - extremely aggressive for stability
-        spo2 = spo2 * 0.98f + newSpo2 * 0.02f;
       }
-      // Debug smoothing occasionally
-      static unsigned long lastSmoothingDebug = 0;
-      if (millis() - lastSmoothingDebug >= 10000) {
-        lastSmoothingDebug = millis();
-        Serial.print(F("Clinical SpO2: R="));
-        Serial.print(R, 4);
-        Serial.print(F(" Raw="));
-        Serial.print(newSpo2, 1);
-        Serial.print(F(" Smoothed="));
-        Serial.println(spo2, 1);
-      }
+    }
+    int bufferSize = spo2BufferFilled ? SPO2_BUFFER_SIZE : spo2BufferIndex;
+    float medianSpo2 = sortedBuffer[bufferSize / 2];
+    
+    // Apply smoothing to median value
+    if (spo2 == 0) {
+      spo2 = medianSpo2; // First reading
+    } else {
+      // 95/5 smoothing for SpO2 with median input
+      spo2 = spo2 * 0.95f + medianSpo2 * 0.05f;
+    }
+    
+    // Debug smoothing occasionally
+    static unsigned long lastSmoothingDebug = 0;
+    if (millis() - lastSmoothingDebug >= 10000) {
+      lastSmoothingDebug = millis();
+      Serial.print(F("Clinical SpO2: R="));
+      Serial.print(R, 4);
+      Serial.print(F(" Raw="));
+      Serial.print(newSpo2, 1);
+      Serial.print(F(" Median="));
+      Serial.print(medianSpo2, 1);
+      Serial.print(F(" Smoothed="));
+      Serial.println(spo2, 1);
     }
     
     // Improved signal quality calculation based on multiple factors
