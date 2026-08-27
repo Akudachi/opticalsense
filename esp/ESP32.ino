@@ -1,10 +1,17 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.6.0
+ * Version: 3.6.1
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.6.1:
+ * - Fixed WiFi reconnect loop that prevented AP mode from opening
+ * - Removed auto-reconnect logic in handleWiFi()
+ * - Added WiFi.disconnect() before starting AP mode
+ * - Added better logging for WiFi connection failures
+ * - AP mode now opens reliably when WiFi fails during setup
  * 
  * Changes in v3.6.0:
  * - WiFi timeout reduced to 10 seconds (from 15 seconds)
@@ -136,7 +143,7 @@ void handlePhysicalButtons();
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.6.0";
+constexpr char FIRMWARE_VERSION[] = "3.6.1";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -972,11 +979,17 @@ void connectWiFi() {
     
     // If WiFi fails, immediately start AP mode instead of retrying
     Serial.println(F("WiFi connection failed - Starting AP Mode immediately"));
+    Serial.println(F("Clearing stored WiFi credentials"));
     wifiSSID = "";
     wifiPassword = "";
     preferences.putString("ssid", "");
     preferences.putString("password", "");
     wifiRetryCount = 0;
+    
+    // Force WiFi disconnect before starting AP
+    WiFi.disconnect();
+    sensorSafeDelay(500);
+    
     startAPMode();
   }
 }
@@ -1210,20 +1223,9 @@ void handleWiFi() {
     server.handleClient();
   }
   
-  // Auto reconnect if disconnected
-  if (currentState != STATE_PROVISIONING && WiFi.status() != WL_CONNECTED) {
-    if (millis() - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
-      Serial.println(F("WiFi disconnected - Attempting reconnect"));
-      WiFi.reconnect();
-      lastWifiRetry = millis();
-      wifiRetryCount++;
-      
-      if (wifiRetryCount >= MAX_WIFI_RETRIES) {
-        Serial.println(F("Max WiFi retries - Starting AP Mode"));
-        startAPMode();
-      }
-    }
-  }
+  // No auto-reconnect during normal operation - if WiFi drops, stay offline
+  // This prevents getting stuck in reconnect loops
+  // AP mode will only be opened during setup if initial connection fails
 }
 
 // ============================================================
