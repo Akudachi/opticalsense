@@ -97,10 +97,12 @@ void publishPairRequest();
 void handleMQTT();
 void connectMQTT();
 void startTest();
+void startTest(String source);
 void stopTest();
 void runTestSampling();
 void printDebugInfo();
 String getStateString();
+void handlePhysicalButtons();
 
 // ============================================================
 // PIN CONFIGURATION
@@ -110,6 +112,8 @@ String getStateString();
                               // Physically move the LM35 signal wire from GPIO 15 to GPIO 34
 #define PIN_I2C_SDA      21
 #define PIN_I2C_SCL      22
+#define PIN_BUTTON_START  4   // Device start test button
+#define PIN_BUTTON_STOP   5   // Device stop test button
 
 // ============================================================
 // CONFIGURATION CONSTANTS
@@ -359,6 +363,7 @@ unsigned long sampleCount = 0;
 int stableSampleCount = 0; // Counts samples since finger detection
 bool showingConclusion = false;
 unsigned long conclusionStartTime = 0;
+String testSource = "none"; // "website" or "device"
 
 // OLED
 unsigned long lastOledRefresh = 0;
@@ -504,6 +509,9 @@ void loop() {
   // Handle WiFi
   handleWiFi();
   
+  // Handle physical buttons for device-initiated tests
+  handlePhysicalButtons();
+  
   // Handle MQTT
   handleMQTT();
   
@@ -586,6 +594,8 @@ void loop() {
 // ============================================================
 void initializeGPIO() {
   pinMode(PIN_LM35, INPUT);
+  pinMode(PIN_BUTTON_START, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_STOP, INPUT_PULLUP);
   
   Serial.println(F("GPIO Initialized"));
 }
@@ -1359,7 +1369,7 @@ void handleCommand() {
     if (testRunning) {
       Serial.println(F("WARNING: Test already running, ignoring start command"));
     } else {
-      startTest();
+      startTest("website");
     }
     jsonDoc.clear();
     jsonDoc["status"] = "success";
@@ -1622,9 +1632,16 @@ void runDiagnosticSampling() {
 // START TEST
 // ============================================================
 void startTest() {
+  startTest("website");
+}
+
+void startTest(String source) {
   if (testRunning) return;
   
   Serial.println(F("Starting Test"));
+  Serial.print(F("Test source: "));
+  Serial.println(source);
+  testSource = source;
   
   // Reset signal processing buffers (no longer used but kept for compatibility)
   memset(redBuffer, 0, sizeof(redBuffer));
@@ -1657,6 +1674,39 @@ void startTest() {
   currentState = STATE_TESTING;
   
   publishLog("Test Started");
+}
+
+// ============================================================
+// HANDLE PHYSICAL BUTTONS
+// ============================================================
+void handlePhysicalButtons() {
+  static unsigned long lastButtonRead = 0;
+  static bool lastStartState = HIGH;
+  static bool lastStopState = HIGH;
+  
+  // Read buttons every 50ms to debounce
+  if (millis() - lastButtonRead < 50) return;
+  lastButtonRead = millis();
+  
+  bool startState = digitalRead(PIN_BUTTON_START);
+  bool stopState = digitalRead(PIN_BUTTON_STOP);
+  
+  // Start button pressed (falling edge)
+  if (lastStartState == HIGH && startState == LOW) {
+    if (!testRunning) {
+      startTest("device");
+    }
+  }
+  
+  // Stop button pressed (falling edge)
+  if (lastStopState == HIGH && stopState == LOW) {
+    if (testRunning) {
+      stopTest();
+    }
+  }
+  
+  lastStartState = startState;
+  lastStopState = stopState;
 }
 
 // ============================================================
@@ -1953,9 +2003,8 @@ void updateMAX30100() {
     if (spo2 == 0) {
       spo2 = newSpo2; // First reading
     } else {
-      // 90/10 smoothing for SpO2 - much more aggressive than HR smoothing
-      float oldSpo2 = spo2;
-      spo2 = spo2 * 0.9f + newSpo2 * 0.1f;
+      // 95/5 smoothing for SpO2 - even more aggressive for stability
+      spo2 = spo2 * 0.95f + newSpo2 * 0.05f;
       // Debug smoothing occasionally
       static unsigned long lastSmoothingDebug = 0;
       if (millis() - lastSmoothingDebug >= 10000) {
@@ -1969,10 +2018,12 @@ void updateMAX30100() {
       }
     }
     
-    // Signal quality scales with AC amplitude (stronger pulsatile signal = higher quality)
-    // Adjusted scale to work with smaller AC amplitudes
+    // Improved signal quality calculation based on multiple factors
+    // Consider AC amplitude, DC stability, and signal-to-noise ratio
+    float signalToNoise = irAC > 0 ? (irAC / (irDC * 0.01f + 1.0f)) : 0.0f;
+    float dcStability = baselineStable ? 1.0f : 0.5f;
     signalQuality = constrain(
-      (float)(irAC - 5) * (100.0f / (PEAK_THRESHOLD_MAX - 5)),
+      (signalToNoise * 0.6f + dcStability * 0.4f) * 100.0f,
       0.0f, 100.0f);
   } else {
     spo2 = 0;
@@ -2306,39 +2357,55 @@ void updateOLED() {
       display.println(F("Enter on website"));
       break;
     case STATE_READY:
-      // Header
+      // Compact layout with smaller text
+      display.setTextSize(1);
+      display.setCursor(0, 0);
       display.println(F("READY"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-      // Show current readings
+      
+      // Row 1: SpO2 and Temp
       display.setCursor(0, 12);
-      display.print(F("SpO2:"));
+      display.print(F("O2:"));
       if (spo2 >= 70 && spo2 <= 100) {
         display.print((int)spo2);
         display.print(F("%"));
       } else {
-        display.print(F("--%"));
+        display.print(F("--"));
       }
-      display.setCursor(72, 12);
-      display.print(F("Temp:"));
+      display.setCursor(64, 12);
+      display.print(F("T:"));
       display.print(temperature, 1);
       display.print(F("C"));
+      
+      // Row 2: HR and Battery
       display.setCursor(0, 22);
-      display.print(F("Vitality:"));
-      display.print(vitalityStatus);
-      display.setCursor(72, 22);
-      drawBatteryIcon(72, 22);
-      display.setCursor(88, 22);
+      display.print(F("HR:"));
+      if (heartRate >= 30 && heartRate <= 220) {
+        display.print((int)heartRate);
+      } else {
+        display.print(F("--"));
+      }
+      display.setCursor(64, 22);
+      display.print(F("B:"));
       display.print((int)batteryPercent);
       display.print(F("%"));
-      // Status
+      
+      // Row 3: Vitality
       display.setCursor(0, 32);
-      display.print(F("Status: Ready"));
-      display.setCursor(0, 44);
-      display.print(F("Press START to test"));
+      display.print(F("V:"));
+      display.print(vitalityStatus.substring(0, 6)); // Truncate to fit
+      
+      // Row 4: Source info
+      display.setCursor(0, 42);
+      display.print(F("Press btn/web"));
       break;
     case STATE_TESTING:
-      // Header with elapsed time
-      display.print(F("TESTING "));
+      // Compact layout
+      display.setTextSize(1);
+      display.setCursor(0, 0);
+      display.print(F("TEST"));
+      display.print(testSource == "device" ? F("(D)") : F("(W)")); // D=device, W=website
+      display.print(F(" "));
       {
         unsigned long testSec = (millis() - testStartTime) / 1000;
         display.print(testSec / 60);
@@ -2348,44 +2415,46 @@ void updateOLED() {
       }
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
-      // Show SpO2, Temp, Vitality Status
+      // Row 1: SpO2 and Temp
       display.setCursor(0, 12);
-      display.print(F("SpO2:"));
+      display.print(F("O2:"));
       if (spo2 >= 70 && spo2 <= 100) {
         display.print((int)spo2);
         display.print(F("%"));
       } else {
-        display.print(F("--%"));
+        display.print(F("--"));
       }
-      
-      display.setCursor(72, 12);
-      display.print(F("Temp:"));
+      display.setCursor(64, 12);
+      display.print(F("T:"));
       display.print(temperature, 1);
       display.print(F("C"));
       
+      // Row 2: HR and Battery
       display.setCursor(0, 22);
-      display.print(F("Vitality:"));
-      display.print(vitalityStatus);
-      
-      display.setCursor(0, 32);
       display.print(F("HR:"));
       if (heartRate >= 30 && heartRate <= 220) {
         display.print((int)heartRate);
-        display.print(F("bpm"));
       } else {
-        display.print(F("--bpm"));
+        display.print(F("--"));
       }
-      
-      display.setCursor(72, 32);
-      drawBatteryIcon(72, 32);
-      display.setCursor(88, 32);
+      display.setCursor(64, 22);
+      display.print(F("B:"));
       display.print((int)batteryPercent);
       display.print(F("%"));
       
-      // Show beat detection indicator
+      // Row 3: Vitality
+      display.setCursor(0, 32);
+      display.print(F("V:"));
+      display.print(vitalityStatus.substring(0, 6));
+      
+      // Row 4: Sample count
+      display.setCursor(0, 42);
+      display.print(F("S:"));
+      display.print(sampleCount);
+      
+      // Beat indicator
       if (beatDetected) {
-        display.setTextSize(1);
-        display.setCursor(100, 22);
+        display.setCursor(110, 42);
         display.print(F("♥"));
       }
       
@@ -2618,6 +2687,7 @@ void publishTelemetry() {
   jsonDoc["deviceState"] = getStateString();
   jsonDoc["sampleCount"] = sampleCount;
   jsonDoc["testDuration"] = testRunning ? (millis() - testStartTime) : testDuration;
+  jsonDoc["testSource"] = testSource; // "website" or "device"
   // Legacy compatibility fields
   jsonDoc["redFiltered"] = redFiltered;
   jsonDoc["irFiltered"] = irFiltered;
