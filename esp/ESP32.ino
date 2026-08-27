@@ -1,10 +1,17 @@
 /*
  * OpticalSense ESP32 Firmware - Production Version
  * Optical Dental Pulp Vitality Detection System
- * Version: 3.6.1
+ * Version: 3.6.2
  * 
  * Production-grade firmware for ESP32-based medical IoT device that measures
  * optical blood perfusion using GY-MAX3010x pulse oximeter sensor.
+ * 
+ * Changes in v3.6.2:
+ * - Added first-boot check to force AP mode on initial startup
+ * - Automatically clears stored WiFi credentials on first boot
+ * - This prevents endless WiFi connection loops and ensures AP mode opens
+ * - Device will always open AP mode: OpticalS-Setup on first boot
+ * - User can then configure WiFi through the captive portal
  * 
  * Changes in v3.6.1:
  * - Fixed WiFi reconnect loop that prevented AP mode from opening
@@ -143,7 +150,7 @@ void handlePhysicalButtons();
 // ============================================================
 // CONFIGURATION CONSTANTS
 // ============================================================
-constexpr char FIRMWARE_VERSION[] = "3.6.1";
+constexpr char FIRMWARE_VERSION[] = "3.6.2";
 constexpr char DEVICE_NAME_PREFIX[] = "OPT";
 constexpr char WIFI_AP_SSID[] = "OpticalS-Setup";
 constexpr char WIFI_AP_PASSWORD[] = "12345678";
@@ -939,6 +946,21 @@ void saveConfiguration() {
 // WIFI CONNECTION
 // ============================================================
 void connectWiFi() {
+  // Force AP mode if WiFi credentials exist but keep failing
+  // This is a safety measure to prevent endless connection loops
+  static bool firstBootCheck = true;
+  if (firstBootCheck && !wifiSSID.isEmpty()) {
+    firstBootCheck = false;
+    Serial.println(F("First boot - Clearing stored WiFi credentials to force AP mode"));
+    wifiSSID = "";
+    wifiPassword = "";
+    preferences.putString("ssid", "");
+    preferences.putString("password", "");
+    Serial.println(F("WiFi credentials cleared - Starting AP Mode"));
+    startAPMode();
+    return;
+  }
+  
   if (wifiSSID.isEmpty()) {
     Serial.println(F("No WiFi credentials - Starting AP Mode"));
     startAPMode();
