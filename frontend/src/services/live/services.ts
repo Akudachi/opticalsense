@@ -58,6 +58,7 @@ function storeDevices(devices: Device[]): void {
 
 // Global device status listener for online/offline detection
 let globalStatusUnsubscribe: (() => void) | null = null;
+let globalStatusInitializing = false; // Prevent concurrent initialization
 
 async function initializeGlobalStatusListener() {
   if (globalStatusUnsubscribe) {
@@ -65,11 +66,17 @@ async function initializeGlobalStatusListener() {
     return; // Already initialized
   }
 
+  if (globalStatusInitializing) {
+    console.log('Global status listener already initializing - skipping');
+    return; // Already in progress
+  }
+
+  globalStatusInitializing = true;
+
   try {
-    // Only connect if not already connected
-    if (!mqttClient.isConnected()) {
-      await mqttClient.connect();
-    }
+    // DON'T call connect() here - let the first consumer establish the connection
+    // The global status listener will subscribe once the connection is established
+    // This prevents multiple connect() calls from closing the connection
     
     const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
     const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
@@ -191,6 +198,8 @@ async function initializeGlobalStatusListener() {
     };
   } catch (err) {
     console.error('Failed to initialize global status listener:', err);
+  } finally {
+    globalStatusInitializing = false;
   }
 }
 
