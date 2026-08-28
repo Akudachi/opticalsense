@@ -659,24 +659,35 @@ export const liveDevices: IDeviceService = {
     // Subscribe to pairing topic to receive device info
     return new Promise(async (resolve, reject) => {
       const topic = `${env.MQTT.topicPrefix}/device/+/pair/request`;
-      console.log('Starting pairing with code:', code);
+      console.log('=== PAIRING START ===');
+      console.log('Pairing code entered by user:', code);
+      console.log('MQTT Topic Prefix:', env.MQTT.topicPrefix);
       console.log('Subscribing to topic:', topic);
+      console.log('MQTT Host:', env.MQTT.host);
+      console.log('MQTT Port:', env.MQTT.port);
+      console.log('MQTT Username:', env.MQTT.username);
+      console.log('Is MQTT connected:', mqttClient.isConnected());
       
       // Ensure MQTT is connected before subscribing
       try {
         await mqttClient.connect();
-        console.log('MQTT connected, now subscribing to pairing topic');
+        console.log('MQTT connected successfully');
       } catch (err) {
         console.error('Failed to connect to MQTT:', err);
-        reject(new Error('Failed to connect to MQTT'));
+        reject(new Error('Failed to connect to MQTT. Check console for details.'));
         return;
       }
       
       const timeout = setTimeout(() => {
-        console.error('Pairing timeout - no device found with code:', code);
+        console.error('=== PAIRING TIMEOUT ===');
+        console.error('No device found with code:', code);
+        console.error('Check that:');
+        console.error('1. Device is powered on and connected to WiFi');
+        console.error('2. Device is displaying the same code on OLED');
+        console.error('3. MQTT broker is accessible from this network');
+        console.error('4. Environment variables are set correctly in .env.local');
         
         // Publish failure response to any device that might be waiting
-        // This allows the device to react immediately instead of just timing out
         const failureTopic = `${env.MQTT.topicPrefix}/device/+/pair/response`;
         const failureData = {
           status: 'FAILED',
@@ -689,20 +700,25 @@ export const liveDevices: IDeviceService = {
       }, 30000);
 
       const unsubscribe = mqttClient.subscribe(topic, (topic, message) => {
-        console.log('Received message on topic:', topic);
-        console.log('Message content:', message.toString());
+        console.log('=== RECEIVED PAIRING REQUEST ===');
+        console.log('Topic:', topic);
+        console.log('Message:', message.toString());
         try {
           const data = JSON.parse(message.toString());
           console.log('Parsed data:', data);
-          console.log('Looking for code:', code, 'Got code:', data.pairingCode);
+          console.log('Device ID:', data.deviceId);
+          console.log('Pairing Code from device:', data.pairingCode);
+          console.log('Pairing Code from user:', code);
+          
           if (data.pairingCode === code) {
-            console.log('Code matched! Waiting 3 seconds before sending response (firmware requirement)');
+            console.log('=== CODE MATCHED ===');
             clearTimeout(timeout);
             unsubscribe();
             
             // CRITICAL: Firmware requires at least 3 seconds delay between
             // device publishing pairing request and receiving SUCCESS response
             // This prevents auto-pairing from retained MQTT messages
+            console.log('Waiting 3 seconds before sending response (firmware requirement)...');
             setTimeout(() => {
               // Send pairing response to device
               const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
@@ -718,9 +734,6 @@ export const liveDevices: IDeviceService = {
               console.log('Publishing pairing response to:', responseTopic);
               console.log('Response data:', responseData);
               
-              // CRITICAL FIX: Use retain: false to prevent broker from persisting the pairing response
-              // With retain: true, the broker keeps the message forever and delivers it to any
-              // client that subscribes, causing devices to auto-pair on every reconnect.
               mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
               
               const device: Device = {
@@ -748,14 +761,19 @@ export const liveDevices: IDeviceService = {
               }
               storeDevices(devices);
               
+              console.log('=== PAIRING SUCCESSFUL ===');
               console.log('Device stored:', device);
               resolve(device);
             }, 3000); // 3 second delay required by firmware
+          } else {
+            console.log('Code did not match - ignoring this device');
           }
         } catch (err) {
           console.error('Error parsing pairing message:', err);
         }
       });
+      
+      console.log('Waiting for device to publish pairing request...');
     });
   },
   
