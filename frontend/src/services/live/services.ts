@@ -66,7 +66,11 @@ async function initializeGlobalStatusListener() {
   }
 
   try {
-    await mqttClient.connect();
+    // Only connect if not already connected
+    if (!mqttClient.isConnected()) {
+      await mqttClient.connect();
+    }
+    
     const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
     const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
     console.log('Initializing global device status listener on topics:', statusTopic, directStatusTopic);
@@ -666,17 +670,23 @@ export const liveDevices: IDeviceService = {
       console.log('MQTT Host:', env.MQTT.host);
       console.log('MQTT Port:', env.MQTT.port);
       console.log('MQTT Username:', env.MQTT.username);
-      console.log('Is MQTT connected:', mqttClient.isConnected());
+      console.log('Is MQTT connected before connect():', mqttClient.isConnected());
       
-      // Ensure MQTT is connected before subscribing
-      try {
-        await mqttClient.connect();
-        console.log('MQTT connected successfully');
-      } catch (err) {
-        console.error('Failed to connect to MQTT:', err);
-        reject(new Error('Failed to connect to MQTT. Check console for details.'));
-        return;
+      // Only connect if not already connected
+      if (!mqttClient.isConnected()) {
+        try {
+          await mqttClient.connect();
+          console.log('MQTT connected successfully');
+        } catch (err) {
+          console.error('Failed to connect to MQTT:', err);
+          reject(new Error('Failed to connect to MQTT. Check console for details.'));
+          return;
+        }
+      } else {
+        console.log('MQTT already connected, skipping connect()');
       }
+      
+      console.log('Is MQTT connected after check:', mqttClient.isConnected());
       
       const timeout = setTimeout(() => {
         console.error('=== PAIRING TIMEOUT ===');

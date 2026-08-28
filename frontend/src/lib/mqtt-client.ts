@@ -37,7 +37,7 @@ class MQTTClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.client?.connected) {
-        console.log('MQTT already connected');
+        console.log('MQTT already connected - skipping connect()');
         resolve();
         return;
       }
