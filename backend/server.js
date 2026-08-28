@@ -45,6 +45,12 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe(`${topicPrefix}/device/+/pair/request`);
   mqttClient.subscribe(`${topicPrefix}/device/+/heartbeat`);
   mqttClient.subscribe(`${topicPrefix}/device/+/status/+`); // For device online/offline status updates
+
+  // CRITICAL FIX: Clear any retained messages on pair/response topics from previous testing
+  // This prevents devices from auto-pairing due to old retained SUCCESS messages
+  console.log('Clearing retained messages from pair/response topics...');
+  mqttClient.publish(`${topicPrefix}/device/+/pair/response`, '', { retain: true, qos: 1 });
+  console.log('Cleared retained pair/response messages');
 });
 
 mqttClient.on('message', (topic, message) => {
@@ -64,27 +70,15 @@ mqttClient.on('message', (topic, message) => {
     }
 
     // Handle pairing requests
+    // NOTE: Backend does NOT auto-accept pairing requests anymore.
+    // Pairing is now entirely handled by the frontend where the user enters the code.
+    // The backend only logs the request for debugging purposes.
     if (topic.includes('pair/request')) {
       console.log('Received pairing request from device:', data.deviceId);
       console.log('Pairing code:', data.pairingCode);
       console.log('Full topic:', topic);
-
-      // Publish pairing response back to the specific device
-      const responseTopic = `${topicPrefix}/device/${data.deviceId}/pair/response`;
-      const responseData = {
-        status: 'SUCCESS',
-        deviceId: data.deviceId,
-        clinicId: 'demo-clinic-id',
-        clinicName: 'Demo Clinic',
-        deviceName: data.name || data.deviceId,
-        timestamp: new Date().toISOString()
-      };
-
-      console.log('Response topic:', responseTopic);
-      console.log('Response data:', JSON.stringify(responseData));
-
-      mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
-      console.log('Published pairing response to:', responseTopic);
+      console.log('Pairing will be handled by frontend when user enters matching code');
+      // No automatic response - frontend handles code validation and response
     }
 
     // Bridge MQTT messages to Socket.IO

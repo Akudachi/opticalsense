@@ -58,6 +58,12 @@ class MQTTClient {
         this.reconnectAttempts = 0;
         this.notifyConnectionCallbacks(true);
         
+        // CRITICAL FIX: Clear any retained messages on pair/response topics from previous testing
+        // This prevents devices from auto-pairing due to old retained SUCCESS messages
+        console.log('Clearing retained messages from pair/response topics...');
+        this.client!.publish(`${env.MQTT.topicPrefix}/device/+/pair/response`, '', { retain: true, qos: 1 });
+        console.log('Cleared retained pair/response messages');
+        
         // Subscribe to all pending topics that were registered before connection
         for (const topic of this.messageCallbacks.keys()) {
           console.log('Subscribing pending topic on connect:', topic);

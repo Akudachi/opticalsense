@@ -674,6 +674,17 @@ export const liveDevices: IDeviceService = {
       
       const timeout = setTimeout(() => {
         console.error('Pairing timeout - no device found with code:', code);
+        
+        // Publish failure response to any device that might be waiting
+        // This allows the device to react immediately instead of just timing out
+        const failureTopic = `${env.MQTT.topicPrefix}/device/+/pair/response`;
+        const failureData = {
+          status: 'FAILED',
+          reason: 'No matching pairing code received within timeout',
+          timestamp: new Date().toISOString()
+        };
+        mqttClient.publish(failureTopic, JSON.stringify(failureData), { retain: false, qos: 1 });
+        
         reject(new Error('Pairing timeout - no device found'));
       }, 30000);
 
@@ -703,7 +714,10 @@ export const liveDevices: IDeviceService = {
             console.log('Publishing pairing response to:', responseTopic);
             console.log('Response data:', responseData);
             
-            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: true, qos: 1 });
+            // CRITICAL FIX: Use retain: false to prevent broker from persisting the pairing response
+            // With retain: true, the broker keeps the message forever and delivers it to any
+            // client that subscribes, causing devices to auto-pair on every reconnect.
+            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
             
             const device: Device = {
               id: data.deviceId,
