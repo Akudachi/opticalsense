@@ -74,11 +74,8 @@ async function initializeGlobalStatusListener() {
   globalStatusInitializing = true;
 
   try {
-    // Ensure MQTT is connected before subscribing
-    if (!mqttClient.isConnected()) {
-      console.log('MQTT not connected, connecting now for global status listener...');
-      await mqttClient.connect();
-    }
+    // NEVER call connect() here - let pairing or other consumers manage the connection
+    // Only subscribe if already connected, otherwise wait for connection to be established elsewhere
     
     const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
     const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;

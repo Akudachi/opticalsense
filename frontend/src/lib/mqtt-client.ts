@@ -58,7 +58,7 @@ class MQTTClient {
         password: env.MQTT.password,
         clean: true,
         connectTimeout: 10000,
-        reconnectPeriod: 5000,
+        reconnectPeriod: 0, // Disable automatic reconnection - we'll handle it manually
       });
 
       this.client.on('connect', () => {
@@ -85,7 +85,10 @@ class MQTTClient {
         console.error('MQTT Error:', err);
         this.reconnectAttempts++;
         
+        // Don't notify connection failure on error - let close/offline handle it
+        // This prevents multiple disconnect notifications
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.error('Max reconnect attempts reached');
           this.notifyConnectionCallbacks(false);
           reject(err);
         }
@@ -94,6 +97,14 @@ class MQTTClient {
       this.client.on('close', () => {
         console.log('MQTT Connection closed');
         this.notifyConnectionCallbacks(false);
+      });
+
+      this.client.on('reconnect', () => {
+        console.log('MQTT Reconnecting...');
+      });
+
+      this.client.on('offline', () => {
+        console.log('MQTT Client offline');
       });
 
       this.client.on('message', (topic, message) => {
