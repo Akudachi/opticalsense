@@ -36,10 +36,18 @@ class MQTTClient {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // If already connected, just resolve
       if (this.client?.connected) {
         console.log('MQTT already connected - skipping connect()');
         resolve();
         return;
+      }
+
+      // If client exists but not connected, end it first
+      if (this.client) {
+        console.log('MQTT client exists but not connected - cleaning up...');
+        this.client.end();
+        this.client = null;
       }
 
       const wsUrl = `wss://${env.MQTT.host}:8884/mqtt`;
