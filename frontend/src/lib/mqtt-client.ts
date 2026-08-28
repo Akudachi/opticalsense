@@ -58,7 +58,7 @@ class MQTTClient {
         password: env.MQTT.password,
         clean: true,
         connectTimeout: 10000,
-        reconnectPeriod: 5000, // Re-enable auto-reconnect
+        reconnectPeriod: 0, // DISABLE auto-reconnect - we'll handle it manually
       });
 
       this.client.on('connect', () => {

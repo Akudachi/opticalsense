@@ -60,46 +60,55 @@ function storeDevices(devices: Device[]): void {
 let globalStatusUnsubscribe: (() => void) | null = null;
 let globalStatusInitializing = false; // Prevent concurrent initialization
 let globalStatusListenerInitialized = false; // Complete flag to prevent any further calls
+let globalStatusInitPromise: Promise<void> | null = null; // Module-level promise to ensure single execution
 
 export async function initializeGlobalStatusListener() {
   console.log('initializeGlobalStatusListener called');
-  console.log('globalStatusListenerInitialized:', globalStatusListenerInitialized);
-  console.log('globalStatusInitializing:', globalStatusInitializing);
-  console.log('globalStatusUnsubscribe:', globalStatusUnsubscribe);
   
-  if (globalStatusListenerInitialized) {
-    console.log('Global status listener COMPLETELY initialized - ignoring call');
-    console.trace('Stack trace of blocked call:');
-    return; // Already initialized - ignore all further calls
+  // If we already have a promise, return it (ensures single execution)
+  if (globalStatusInitPromise) {
+    console.log('Returning existing initialization promise');
+    return globalStatusInitPromise;
   }
-
-  if (globalStatusUnsubscribe) {
-    console.log('Global status listener already initialized');
-    return; // Already initialized
-  }
-
-  if (globalStatusInitializing) {
-    console.log('Global status listener already initializing - skipping');
-    console.trace('Stack trace of concurrent call:');
-    return; // Already in progress
-  }
-
-  globalStatusInitializing = true;
-  console.log('Setting globalStatusInitializing = true');
-
-  try {
-    // Connect to MQTT first, then subscribe
-    // This ensures a stable connection before we start listening for status updates
-    if (!mqttClient.isConnected()) {
-      console.log('MQTT not connected, connecting now for global status listener...');
-      await mqttClient.connect();
-      console.log('MQTT connected successfully');
-    }
+  
+  console.log('Creating new initialization promise');
+  
+  globalStatusInitPromise = (async () => {
+    console.log('Global status listener initialization started');
     
-    const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
-    const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
-    console.log('Initializing global device status listener on topics:', statusTopic, directStatusTopic);
-    console.log('MQTT connected:', mqttClient.isConnected());
+    if (globalStatusListenerInitialized) {
+      console.log('Global status listener COMPLETELY initialized - ignoring call');
+      console.trace('Stack trace of blocked call:');
+      return; // Already initialized - ignore all further calls
+    }
+
+    if (globalStatusUnsubscribe) {
+      console.log('Global status listener already initialized');
+      return; // Already initialized
+    }
+
+    if (globalStatusInitializing) {
+      console.log('Global status listener already initializing - skipping');
+      console.trace('Stack trace of concurrent call:');
+      return; // Already in progress
+    }
+
+    globalStatusInitializing = true;
+    console.log('Setting globalStatusInitializing = true');
+
+    try {
+      // Connect to MQTT first, then subscribe
+      // This ensures a stable connection before we start listening for status updates
+      if (!mqttClient.isConnected()) {
+        console.log('MQTT not connected, connecting now for global status listener...');
+        await mqttClient.connect();
+        console.log('MQTT connected successfully');
+      }
+      
+      const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
+      const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
+      console.log('Initializing global device status listener on topics:', statusTopic, directStatusTopic);
+      console.log('MQTT connected:', mqttClient.isConnected());
 
     // Subscribe to status/+ for backend-generated online/offline messages
     const unsubscribeStatusPlus = mqttClient.subscribe(statusTopic, (topic, message) => {
@@ -219,9 +228,14 @@ export async function initializeGlobalStatusListener() {
     console.log('Global status listener COMPLETELY initialized');
   } catch (err) {
     console.error('Failed to initialize global status listener:', err);
+    // Reset promise on error so it can be retried
+    globalStatusInitPromise = null;
   } finally {
     globalStatusInitializing = false;
   }
+  })(); // Immediately invoke the async function
+  
+  return globalStatusInitPromise;
 }
 
 // Patient storage helpers
