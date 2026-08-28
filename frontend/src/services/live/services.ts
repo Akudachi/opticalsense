@@ -62,8 +62,14 @@ let globalStatusInitializing = false; // Prevent concurrent initialization
 let globalStatusListenerInitialized = false; // Complete flag to prevent any further calls
 
 export async function initializeGlobalStatusListener() {
+  console.log('initializeGlobalStatusListener called');
+  console.log('globalStatusListenerInitialized:', globalStatusListenerInitialized);
+  console.log('globalStatusInitializing:', globalStatusInitializing);
+  console.log('globalStatusUnsubscribe:', globalStatusUnsubscribe);
+  
   if (globalStatusListenerInitialized) {
     console.log('Global status listener COMPLETELY initialized - ignoring call');
+    console.trace('Stack trace of blocked call:');
     return; // Already initialized - ignore all further calls
   }
 
@@ -79,10 +85,16 @@ export async function initializeGlobalStatusListener() {
   }
 
   globalStatusInitializing = true;
+  console.log('Setting globalStatusInitializing = true');
 
   try {
-    // NEVER call connect() here - let pairing or other consumers manage the connection
-    // Only subscribe if already connected, otherwise wait for connection to be established elsewhere
+    // Connect to MQTT first, then subscribe
+    // This ensures a stable connection before we start listening for status updates
+    if (!mqttClient.isConnected()) {
+      console.log('MQTT not connected, connecting now for global status listener...');
+      await mqttClient.connect();
+      console.log('MQTT connected successfully');
+    }
     
     const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
     const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
@@ -690,21 +702,18 @@ export const liveDevices: IDeviceService = {
       console.log('MQTT Username:', env.MQTT.username);
       console.log('Is MQTT connected before connect():', mqttClient.isConnected());
       
-      // Only connect if not already connected
+      // DON'T call connect() here - trust that the global status listener
+      // has already established the connection when the user authenticated
+      // Calling connect() here can disconnect and reconnect, losing subscriptions
+      
       if (!mqttClient.isConnected()) {
-        try {
-          await mqttClient.connect();
-          console.log('MQTT connected successfully');
-        } catch (err) {
-          console.error('Failed to connect to MQTT:', err);
-          reject(new Error('Failed to connect to MQTT. Check console for details.'));
-          return;
-        }
-      } else {
-        console.log('MQTT already connected, skipping connect()');
+        console.error('MQTT not connected when trying to pair!');
+        console.error('This should not happen - global status listener should have connected it');
+        reject(new Error('MQTT not connected. Refresh the page to reinitialize.'));
+        return;
       }
       
-      console.log('Is MQTT connected after check:', mqttClient.isConnected());
+      console.log('MQTT is connected, proceeding with pairing');
       
       const timeout = setTimeout(() => {
         console.error('=== PAIRING TIMEOUT ===');
@@ -762,7 +771,7 @@ export const liveDevices: IDeviceService = {
               console.log('Publishing pairing response to:', responseTopic);
               console.log('Response data:', responseData);
               
-              mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
+              mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 0 });
               
               const device: Device = {
                 id: data.deviceId,
