@@ -58,7 +58,7 @@ class MQTTClient {
         password: env.MQTT.password,
         clean: true,
         connectTimeout: 10000,
-        reconnectPeriod: 0, // Disable automatic reconnection - we'll handle it manually
+        reconnectPeriod: 5000, // Re-enable auto-reconnect
       });
 
       this.client.on('connect', () => {
@@ -96,6 +96,7 @@ class MQTTClient {
 
       this.client.on('close', () => {
         console.log('MQTT Connection closed');
+        console.trace('Stack trace of close event:');
         this.notifyConnectionCallbacks(false);
       });
 

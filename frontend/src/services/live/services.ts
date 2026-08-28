@@ -59,8 +59,14 @@ function storeDevices(devices: Device[]): void {
 // Global device status listener for online/offline detection
 let globalStatusUnsubscribe: (() => void) | null = null;
 let globalStatusInitializing = false; // Prevent concurrent initialization
+let globalStatusListenerInitialized = false; // Complete flag to prevent any further calls
 
 async function initializeGlobalStatusListener() {
+  if (globalStatusListenerInitialized) {
+    console.log('Global status listener COMPLETELY initialized - ignoring call');
+    return; // Already initialized - ignore all further calls
+  }
+
   if (globalStatusUnsubscribe) {
     console.log('Global status listener already initialized');
     return; // Already initialized
@@ -68,6 +74,7 @@ async function initializeGlobalStatusListener() {
 
   if (globalStatusInitializing) {
     console.log('Global status listener already initializing - skipping');
+    console.trace('Stack trace of concurrent call:');
     return; // Already in progress
   }
 
@@ -195,6 +202,9 @@ async function initializeGlobalStatusListener() {
       unsubscribeStatusPlus();
       unsubscribeDirectStatus();
     };
+    
+    globalStatusListenerInitialized = true;
+    console.log('Global status listener COMPLETELY initialized');
   } catch (err) {
     console.error('Failed to initialize global status listener:', err);
   } finally {
