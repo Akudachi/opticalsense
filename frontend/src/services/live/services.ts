@@ -696,56 +696,61 @@ export const liveDevices: IDeviceService = {
           console.log('Parsed data:', data);
           console.log('Looking for code:', code, 'Got code:', data.pairingCode);
           if (data.pairingCode === code) {
-            console.log('Code matched! Sending pairing response');
+            console.log('Code matched! Waiting 3 seconds before sending response (firmware requirement)');
             clearTimeout(timeout);
             unsubscribe();
             
-            // Send pairing response to device
-            const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
-            const responseData = {
-              status: 'SUCCESS',
-              deviceId: data.deviceId,
-              clinicId: 'demo-clinic-id',
-              clinicName: 'Demo Clinic',
-              deviceName: data.name || data.deviceId,
-              timestamp: new Date().toISOString()
-            };
-            
-            console.log('Publishing pairing response to:', responseTopic);
-            console.log('Response data:', responseData);
-            
-            // CRITICAL FIX: Use retain: false to prevent broker from persisting the pairing response
-            // With retain: true, the broker keeps the message forever and delivers it to any
-            // client that subscribes, causing devices to auto-pair on every reconnect.
-            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
-            
-            const device: Device = {
-              id: data.deviceId,
-              name: data.name || data.deviceId,
-              deviceId: data.deviceId,
-              status: 'online',
-              online: true,
-              battery: data.battery || 100,
-              batteryPct: data.battery || 100,
-              signalStrength: 85,
-              lastSeen: new Date().toISOString(),
-              firmware: data.firmware || 'unknown',
-              wifi: { ssid: 'Unknown', rssi: -50, connected: true },
-              mqtt: 'connected',
-            };
-            
-            // Store device in localStorage
-            const devices = getStoredDevices();
-            const existingIndex = devices.findIndex(d => d.id === device.id);
-            if (existingIndex >= 0) {
-              devices[existingIndex] = device;
-            } else {
-              devices.push(device);
-            }
-            storeDevices(devices);
-            
-            console.log('Device stored:', device);
-            resolve(device);
+            // CRITICAL: Firmware requires at least 3 seconds delay between
+            // device publishing pairing request and receiving SUCCESS response
+            // This prevents auto-pairing from retained MQTT messages
+            setTimeout(() => {
+              // Send pairing response to device
+              const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
+              const responseData = {
+                status: 'SUCCESS',
+                deviceId: data.deviceId,
+                clinicId: 'demo-clinic-id',
+                clinicName: 'Demo Clinic',
+                deviceName: data.name || data.deviceId,
+                timestamp: new Date().toISOString()
+              };
+              
+              console.log('Publishing pairing response to:', responseTopic);
+              console.log('Response data:', responseData);
+              
+              // CRITICAL FIX: Use retain: false to prevent broker from persisting the pairing response
+              // With retain: true, the broker keeps the message forever and delivers it to any
+              // client that subscribes, causing devices to auto-pair on every reconnect.
+              mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
+              
+              const device: Device = {
+                id: data.deviceId,
+                name: data.name || data.deviceId,
+                deviceId: data.deviceId,
+                status: 'online',
+                online: true,
+                battery: data.battery || 100,
+                batteryPct: data.battery || 100,
+                signalStrength: 85,
+                lastSeen: new Date().toISOString(),
+                firmware: data.firmware || 'unknown',
+                wifi: { ssid: 'Unknown', rssi: -50, connected: true },
+                mqtt: 'connected',
+              };
+              
+              // Store device in localStorage
+              const devices = getStoredDevices();
+              const existingIndex = devices.findIndex(d => d.id === device.id);
+              if (existingIndex >= 0) {
+                devices[existingIndex] = device;
+              } else {
+                devices.push(device);
+              }
+              storeDevices(devices);
+              
+              console.log('Device stored:', device);
+              resolve(device);
+            }, 3000); // 3 second delay required by firmware
           }
         } catch (err) {
           console.error('Error parsing pairing message:', err);
