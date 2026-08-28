@@ -61,7 +61,7 @@ let globalStatusUnsubscribe: (() => void) | null = null;
 let globalStatusInitializing = false; // Prevent concurrent initialization
 let globalStatusListenerInitialized = false; // Complete flag to prevent any further calls
 
-async function initializeGlobalStatusListener() {
+export async function initializeGlobalStatusListener() {
   if (globalStatusListenerInitialized) {
     console.log('Global status listener COMPLETELY initialized - ignoring call');
     return; // Already initialized - ignore all further calls
@@ -636,8 +636,8 @@ function addActivityEvent(kind: ActivityEvent['kind'], message: string, refId?: 
 // Device service with MQTT pairing support
 export const liveDevices: IDeviceService = {
   list: async (): Promise<Device[]> => {
-    // Initialize global status listener on first call
-    initializeGlobalStatusListener();
+    // NOTE: Global status listener is now initialized at app level in _authenticated.tsx
+    // to prevent it from being called repeatedly by refetchInterval queries
 
     // Return devices from local storage
     // Don't do client-side offline detection here - rely on backend status updates
