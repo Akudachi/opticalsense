@@ -767,43 +767,79 @@ export const liveDevices: IDeviceService = {
   },
   
   refresh: async (id: string): Promise<Device> => {
-    // Actually check device status by attempting to get recent telemetry
+    // Send get_status command to device and wait for response
+    // Do not trust retained messages - only accept fresh responses
     const devices = getStoredDevices();
     const index = devices.findIndex(d => d.id === id);
-    if (index >= 0) {
-      const device = devices[index];
-      const now = Date.now();
-      const offlineThreshold = 60000; // 60 seconds
-      const lastSeenTime = new Date(device.lastSeen).getTime();
-      const isOffline = now - lastSeenTime > offlineThreshold;
+    if (index < 0) {
+      throw new Error('Device not found');
+    }
+    
+    const device = devices[index];
+    console.log('Refreshing device status for:', device.deviceId);
+    
+    return new Promise(async (resolve, reject) => {
+      try {
+        await mqttClient.connect();
+      } catch (err) {
+        console.error('Failed to connect to MQTT:', err);
+        // If MQTT connection fails, device is considered offline
+        devices[index] = {
+          ...device,
+          online: false,
+          status: 'offline',
+        };
+        storeDevices(devices);
+        resolve(devices[index]);
+        return;
+      }
       
-      // If device is offline, try to check if it's actually responsive
-      if (isOffline) {
-        console.log('Device appears offline, checking if actually responsive...');
-        
-        // Try to subscribe to status topic to check if device responds
-        return new Promise(async (resolve, reject) => {
+      // Send get_status command to device
+      const commandTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/commands`;
+      const commandData = {
+        command: 'get_status',
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('Sending get_status command to device:', device.deviceId);
+      mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+      
+      // Subscribe to status topic to wait for response
+      const statusTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/status`;
+      let responseReceived = false;
+      
+      const timeout = setTimeout(() => {
+        if (!responseReceived) {
+          console.log('No status response received within timeout, device is offline');
+          // Mark device as offline - no response means device is not actually online
+          devices[index] = {
+            ...device,
+            online: false,
+            status: 'offline',
+          };
+          storeDevices(devices);
+          resolve(devices[index]);
+        }
+      }, 5000); // 5 second timeout for status check
+      
+      const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
+        if (!responseReceived) {
+          responseReceived = true;
+          clearTimeout(timeout);
+          unsubscribe();
+          
           try {
-            await mqttClient.connect();
-          } catch (err) {
-            console.error('Failed to connect to MQTT:', err);
-            // Keep device offline if MQTT connection fails
-            devices[index] = {
-              ...device,
-              online: false,
-              status: 'offline',
-            };
-            storeDevices(devices);
-            resolve(devices[index]);
-            return;
-          }
-          
-          const statusTopic = `${env.MQTT.topicPrefix}/device/${device.deviceId}/status`;
-          let messageReceived = false;
-          
-          const timeout = setTimeout(() => {
-            if (!messageReceived) {
-              console.log('No status response received, device is truly offline');
+            const data = JSON.parse(message.toString());
+            console.log('Received status response during refresh:', data);
+            
+            // Only trust the response if it was sent recently (within last 10 seconds)
+            const messageTime = new Date(data.timestamp || data.lastSeen).getTime();
+            const now = Date.now();
+            const isRecent = (now - messageTime) < 10000; // 10 seconds
+            
+            if (!isRecent) {
+              console.log('Received old retained message, ignoring');
+              // Treat as offline if we only get old messages
               devices[index] = {
                 ...device,
                 online: false,
@@ -811,63 +847,46 @@ export const liveDevices: IDeviceService = {
               };
               storeDevices(devices);
               resolve(devices[index]);
+              return;
             }
-          }, 5000); // 5 second timeout for status check
-          
-          const unsubscribe = mqttClient.subscribe(statusTopic, (topic, message) => {
-            if (!messageReceived) {
-              messageReceived = true;
-              clearTimeout(timeout);
-              unsubscribe();
-              
-              try {
-                const data = JSON.parse(message.toString());
-                console.log('Received status message during refresh:', data);
-                
-                // Only mark as online if status explicitly says online
-                const isOnline = data.status?.toLowerCase().includes('online') || false;
-                
-                devices[index] = {
-                  ...device,
-                  online: isOnline,
-                  status: isOnline ? 'online' : 'offline',
-                  lastSeen: new Date().toISOString(),
-                  battery: data.battery || device.battery,
-                  batteryPct: data.battery || device.batteryPct,
-                  wifi: { 
-                    ssid: device.wifi?.ssid || 'Unknown', 
-                    rssi: data.wifi || device.wifi?.rssi || -50, 
-                    connected: isOnline 
-                  },
-                  mqtt: data.mqtt || 'unknown',
-                };
-                storeDevices(devices);
-                resolve(devices[index]);
-              } catch (err) {
-                console.error('Error parsing status message:', err);
-                devices[index] = {
-                  ...device,
-                  online: false,
-                  status: 'offline',
-                };
-                storeDevices(devices);
-                resolve(devices[index]);
-              }
-            }
-          });
-        });
-      } else {
-        // Device is within threshold, keep current status
-        devices[index] = {
-          ...device,
-          online: true,
-          status: 'online',
-        };
-        storeDevices(devices);
-        return devices[index];
-      }
-    }
-    throw new Error('Device not found');
+            
+            // Update device status based on fresh response
+            const isOnline = data.status?.toLowerCase().includes('online') || 
+                           data.online === true || 
+                           (data.deviceState && data.deviceState !== 'offline');
+            
+            devices[index] = {
+              ...device,
+              online: isOnline,
+              status: isOnline ? (data.status || 'online') : 'offline',
+              lastSeen: data.lastSeen || device.lastSeen,
+              deviceState: data.deviceState || device.deviceState,
+              battery: data.battery ?? device.battery,
+              batteryPct: data.battery ?? device.batteryPct,
+              wifi: { 
+                ssid: data.wifi?.ssid || device.wifi?.ssid || 'Unknown', 
+                rssi: data.wifi?.rssi || device.wifi?.rssi || -50, 
+                connected: isOnline 
+              },
+              mqtt: data.mqtt || 'unknown',
+            };
+            storeDevices(devices);
+            console.log('Device status updated after refresh:', isOnline);
+            resolve(devices[index]);
+          } catch (err) {
+            console.error('Error parsing status message:', err);
+            // If we can't parse the message, treat as offline
+            devices[index] = {
+              ...device,
+              online: false,
+              status: 'offline',
+            };
+            storeDevices(devices);
+            resolve(devices[index]);
+          }
+        }
+      });
+    });
   },
   
   repair: async (id: string): Promise<Device> => {
