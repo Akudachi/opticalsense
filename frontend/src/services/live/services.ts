@@ -107,103 +107,105 @@ export async function initializeGlobalStatusListener() {
       
       const statusTopic = `${env.MQTT.topicPrefix}/device/+/status/+`;
       const directStatusTopic = `${env.MQTT.topicPrefix}/device/+/status`;
-      console.log('Initializing global device status listener on topics:', statusTopic, directStatusTopic);
+      const heartbeatTopic = `${env.MQTT.topicPrefix}/device/+/heartbeat`;
+      console.log('Initializing global device status listener on topics:', statusTopic, directStatusTopic, heartbeatTopic);
       console.log('MQTT connected:', mqttClient.isConnected());
 
     // Subscribe to status/+ for backend-generated online/offline messages
     const unsubscribeStatusPlus = mqttClient.subscribe(statusTopic, (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
-        console.log('=== GLOBAL STATUS UPDATE (status/+) ===');
-        console.log('Topic:', topic);
-        console.log('Data:', data);
-
-        // Extract device ID from topic
         const deviceIdMatch = topic.match(/device\/([^\/]+)\/status/);
-        if (!deviceIdMatch) {
-          console.log('Could not extract device ID from topic:', topic);
-          return;
-        }
+        if (!deviceIdMatch) return;
         const deviceId = deviceIdMatch[1];
-        console.log('Device ID from topic:', deviceId);
 
-        // Update device online status
         const devices = getStoredDevices();
-        console.log('Current devices:', devices.map(d => ({ id: d.id, deviceId: d.deviceId, online: d.online })));
-
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
         if (idx >= 0) {
-          const oldStatus = devices[idx].online;
+          const isOnline = data.status === 'offline' ? false : (data.online ?? true);
           devices[idx] = {
             ...devices[idx],
-            online: data.online ?? devices[idx].online,
-            status: data.status ?? devices[idx].status,
-            lastSeen: data.lastSeen ?? devices[idx].lastSeen,
-            deviceState: data.deviceState ?? devices[idx].deviceState,
+            online: isOnline,
+            status: isOnline ? 'online' : 'offline',
+            lastSeen: new Date().toISOString(),
+            deviceState: data.deviceState ?? data.state ?? devices[idx].deviceState,
             battery: data.battery ?? devices[idx].battery,
             batteryPct: data.battery ?? devices[idx].batteryPct,
           };
           storeDevices(devices);
-          console.log(`Device ${deviceId} status updated: ${oldStatus} -> ${data.online}, status: ${data.status}`);
-        } else {
-          console.log(`Device ${deviceId} not found in stored devices`);
+          console.log(`Device ${deviceId} status updated: ${data.status}, online: ${isOnline}`);
         }
       } catch (err) {
         console.error('Error parsing global status message:', err);
       }
     });
 
-    // Also subscribe to direct status topic for device Last Will messages
+    // Subscribe to direct status topic for device status messages
     const unsubscribeDirectStatus = mqttClient.subscribe(directStatusTopic, (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
-        console.log('=== DIRECT STATUS UPDATE (status) ===');
-        console.log('Topic:', topic);
-        console.log('Data:', data);
-
-        // Extract device ID from topic
         const deviceIdMatch = topic.match(/device\/([^\/]+)\/status$/);
-        if (!deviceIdMatch) {
-          console.log('Could not extract device ID from topic:', topic);
-          return;
-        }
+        if (!deviceIdMatch) return;
         const deviceId = deviceIdMatch[1];
-        console.log('Device ID from topic:', deviceId);
 
-        // Update device online status - this catches Last Will messages
         const devices = getStoredDevices();
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
         if (idx >= 0) {
-          const oldStatus = devices[idx].online;
+          const isOnline = data.status === 'offline' ? false : (data.online ?? true);
           devices[idx] = {
             ...devices[idx],
-            online: data.online ?? devices[idx].online,
-            status: data.status ?? devices[idx].status,
-            lastSeen: data.lastSeen ?? devices[idx].lastSeen,
-            deviceState: data.deviceState ?? devices[idx].deviceState,
+            online: isOnline,
+            status: isOnline ? 'online' : 'offline',
+            lastSeen: new Date().toISOString(),
+            deviceState: data.deviceState ?? data.state ?? devices[idx].deviceState,
             battery: data.battery ?? devices[idx].battery,
             batteryPct: data.battery ?? devices[idx].batteryPct,
           };
           storeDevices(devices);
-          console.log(`Device ${deviceId} direct status updated: ${oldStatus} -> ${data.online}, status: ${data.status}`);
+          console.log(`Device ${deviceId} direct status updated: ${data.status}, online: ${isOnline}`);
         }
       } catch (err) {
         console.error('Error parsing direct status message:', err);
       }
     });
 
-    // After subscribing, immediately check all stored devices and mark them offline
-    // if they haven't been seen recently (in case we missed the Last Will message)
+    // Subscribe to heartbeat topic globally
+    const unsubscribeHeartbeat = mqttClient.subscribe(heartbeatTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        const deviceIdMatch = topic.match(/device\/([^\/]+)\/heartbeat$/);
+        if (!deviceIdMatch) return;
+        const deviceId = deviceIdMatch[1];
+
+        const devices = getStoredDevices();
+        const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
+        if (idx >= 0) {
+          devices[idx] = {
+            ...devices[idx],
+            online: true,
+            status: 'online',
+            lastSeen: new Date().toISOString(),
+            deviceState: data.state || data.deviceState || devices[idx].deviceState,
+            battery: data.battery ?? devices[idx].battery,
+            batteryPct: data.battery ?? devices[idx].batteryPct,
+          };
+          storeDevices(devices);
+        }
+      } catch (err) {
+        console.error('Error parsing global heartbeat message:', err);
+      }
+    });
+
+    // Check stored devices lastSeen threshold on boot (grace period of 60s)
     const devices = getStoredDevices();
     const now = Date.now();
-    const offlineThreshold = 35000; // 35 seconds - slightly more than backend's 30s to avoid race conditions
+    const offlineThreshold = 60000; // 60 seconds
 
     devices.forEach(device => {
       const lastSeenTime = new Date(device.lastSeen).getTime();
       const timeSinceLastSeen = now - lastSeenTime;
 
       if (timeSinceLastSeen > offlineThreshold && device.online) {
-        console.log(`Initial offline check: Device ${device.deviceId} last seen ${Math.floor(timeSinceLastSeen / 1000)}s ago, marking offline`);
         const idx = devices.findIndex(d => d.id === device.id);
         if (idx >= 0) {
           devices[idx] = {
@@ -222,6 +224,7 @@ export async function initializeGlobalStatusListener() {
     globalStatusUnsubscribe = () => {
       unsubscribeStatusPlus();
       unsubscribeDirectStatus();
+      unsubscribeHeartbeat();
     };
     
     globalStatusListenerInitialized = true;

@@ -2683,7 +2683,8 @@ void publishStatus(String status) {
   jsonDoc.clear();
   jsonDoc["deviceId"] = deviceId;
   jsonDoc["status"] = status;
-  jsonDoc["online"] = (status == "online");
+  jsonDoc["online"] = (status != "offline");
+  jsonDoc["state"] = getStateString();
   jsonDoc["battery"] = batteryPercent;
   jsonDoc["voltage"] = batteryVoltage;
   jsonDoc["wifi"] = WiFi.RSSI();
