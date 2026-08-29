@@ -704,120 +704,81 @@ export const liveDevices: IDeviceService = {
   },
   
   pair: async (code: string): Promise<Device> => {
-    // Subscribe to pairing topic to receive device info
-    return new Promise(async (resolve, reject) => {
+    // Ensure MQTT is connected before proceeding
+    if (!mqttClient.isConnected()) {
+      console.log('MQTT not connected yet, connecting before pairing...');
+      await mqttClient.connect();
+    }
+
+    return new Promise((resolve, reject) => {
       const topic = `${env.MQTT.topicPrefix}/device/+/pair/request`;
       console.log('=== PAIRING START ===');
       console.log('Pairing code entered by user:', code);
-      console.log('MQTT Topic Prefix:', env.MQTT.topicPrefix);
       console.log('Subscribing to topic:', topic);
-      console.log('MQTT Host:', env.MQTT.host);
-      console.log('MQTT Port:', env.MQTT.port);
-      console.log('MQTT Username:', env.MQTT.username);
-      console.log('Is MQTT connected before connect():', mqttClient.isConnected());
-      
-      // DON'T call connect() here - trust that the global status listener
-      // has already established the connection when the user authenticated
-      // Calling connect() here can disconnect and reconnect, losing subscriptions
-      
-      if (!mqttClient.isConnected()) {
-        console.error('MQTT not connected when trying to pair!');
-        console.error('This should not happen - global status listener should have connected it');
-        reject(new Error('MQTT not connected. Refresh the page to reinitialize.'));
-        return;
-      }
-      
-      console.log('MQTT is connected, proceeding with pairing');
       
       const timeout = setTimeout(() => {
         console.error('=== PAIRING TIMEOUT ===');
         console.error('No device found with code:', code);
-        console.error('Check that:');
-        console.error('1. Device is powered on and connected to WiFi');
-        console.error('2. Device is displaying the same code on OLED');
-        console.error('3. MQTT broker is accessible from this network');
-        console.error('4. Environment variables are set correctly in .env.local');
-        
-        // Publish failure response to any device that might be waiting
-        const failureTopic = `${env.MQTT.topicPrefix}/device/+/pair/response`;
-        const failureData = {
-          status: 'FAILED',
-          reason: 'No matching pairing code received within timeout',
-          timestamp: new Date().toISOString()
-        };
-        mqttClient.publish(failureTopic, JSON.stringify(failureData), { retain: false, qos: 1 });
-        
-        reject(new Error('Pairing timeout - no device found'));
+        unsubscribe();
+        reject(new Error('Pairing timeout - no device found matching code ' + code));
       }, 30000);
 
-      const unsubscribe = mqttClient.subscribe(topic, (topic, message) => {
+      const unsubscribe = mqttClient.subscribe(topic, (receivedTopic, message) => {
         console.log('=== RECEIVED PAIRING REQUEST ===');
-        console.log('Topic:', topic);
-        console.log('Message:', message.toString());
+        console.log('Topic:', receivedTopic);
         try {
           const data = JSON.parse(message.toString());
-          console.log('Parsed data:', data);
-          console.log('Device ID:', data.deviceId);
-          console.log('Pairing Code from device:', data.pairingCode);
-          console.log('Pairing Code from user:', code);
+          console.log('Parsed device data:', data);
           
-          if (data.pairingCode === code) {
-            console.log('=== CODE MATCHED ===');
+          if (String(data.pairingCode).trim() === String(code).trim()) {
+            console.log('=== CODE MATCHED! ===');
             clearTimeout(timeout);
             unsubscribe();
             
-            // CRITICAL: Firmware requires at least 3 seconds delay between
-            // device publishing pairing request and receiving SUCCESS response
-            // This prevents auto-pairing from retained MQTT messages
-            console.log('Waiting 3 seconds before sending response (firmware requirement)...');
-            setTimeout(() => {
-              // Send pairing response to device
-              const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
-              const responseData = {
-                status: 'SUCCESS',
-                deviceId: data.deviceId,
-                clinicId: 'demo-clinic-id',
-                clinicName: 'Demo Clinic',
-                deviceName: data.name || data.deviceId,
-                timestamp: new Date().toISOString()
-              };
-              
-              console.log('Publishing pairing response to:', responseTopic);
-              console.log('Response data:', responseData);
-              
-              mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 0 });
-              
-              const device: Device = {
-                id: data.deviceId,
-                name: data.name || data.deviceId,
-                deviceId: data.deviceId,
-                status: 'online',
-                online: true,
-                battery: data.battery || 100,
-                batteryPct: data.battery || 100,
-                signalStrength: 85,
-                lastSeen: new Date().toISOString(),
-                firmware: data.firmware || 'unknown',
-                wifi: { ssid: 'Unknown', rssi: -50, connected: true },
-                mqtt: 'connected',
-              };
-              
-              // Store device in localStorage
-              const devices = getStoredDevices();
-              const existingIndex = devices.findIndex(d => d.id === device.id);
-              if (existingIndex >= 0) {
-                devices[existingIndex] = device;
-              } else {
-                devices.push(device);
-              }
-              storeDevices(devices);
-              
-              console.log('=== PAIRING SUCCESSFUL ===');
-              console.log('Device stored:', device);
-              resolve(device);
-            }, 3000); // 3 second delay required by firmware
+            // Send pairing response to device immediately
+            const responseTopic = `${env.MQTT.topicPrefix}/device/${data.deviceId}/pair/response`;
+            const responseData = {
+              status: 'SUCCESS',
+              deviceId: data.deviceId,
+              clinicId: 'demo-clinic-id',
+              clinicName: 'Demo Clinic',
+              deviceName: data.name || data.deviceId,
+              timestamp: new Date().toISOString()
+            };
+            
+            console.log('Publishing pairing response to:', responseTopic, responseData);
+            mqttClient.publish(responseTopic, JSON.stringify(responseData), { retain: false, qos: 1 });
+            
+            const device: Device = {
+              id: data.deviceId,
+              name: data.name || data.deviceId,
+              deviceId: data.deviceId,
+              status: 'online',
+              online: true,
+              battery: data.battery || 100,
+              batteryPct: data.battery || 100,
+              signalStrength: 85,
+              lastSeen: new Date().toISOString(),
+              firmware: data.firmware || 'unknown',
+              wifi: { ssid: 'Unknown', rssi: -50, connected: true },
+              mqtt: 'connected',
+            };
+            
+            // Store device in localStorage
+            const devices = getStoredDevices();
+            const existingIndex = devices.findIndex(d => d.id === device.id || d.deviceId === device.deviceId);
+            if (existingIndex >= 0) {
+              devices[existingIndex] = device;
+            } else {
+              devices.push(device);
+            }
+            storeDevices(devices);
+            
+            console.log('=== PAIRING SUCCESSFUL ===');
+            console.log('Device stored:', device);
+            resolve(device);
           } else {
-            console.log('Code did not match - ignoring this device');
+            console.log(`Code received (${data.pairingCode}) does not match entered code (${code})`);
           }
         } catch (err) {
           console.error('Error parsing pairing message:', err);

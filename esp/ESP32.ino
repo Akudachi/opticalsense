@@ -1606,7 +1606,9 @@ void handlePairResponse() {
     
     isPaired = true;
     preferences.putBool("isPaired", true);
-    preferences.end();
+    preferences.putString("clinicId", clinicId);
+    preferences.putString("clinicName", clinicName);
+    preferences.putString("deviceName", deviceName);
     
     Serial.println(F("Pairing Successful"));
     Serial.print(F("isPaired after setting: "));
@@ -1621,8 +1623,9 @@ void handlePairResponse() {
     display.clearDisplay();
     updateOLED();
     
-    // Publish acknowledgment
+    // Publish acknowledgment & updated status
     publishLog("Pair Successful");
+    publishStatus(getStateString());
     
     Serial.println(F("=== HANDLE PAIR RESPONSE END (SUCCESS) ==="));
   } else {
