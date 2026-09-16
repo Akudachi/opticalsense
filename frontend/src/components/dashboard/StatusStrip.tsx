@@ -37,21 +37,21 @@ const DOT: Record<'connected' | 'disconnected', string> = {
 
 export function StatusStrip({ status }: { status: SystemStatus }) {
   return (
-    <GlassCard padded={false} className="p-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <GlassCard padded={false} className="p-3 sm:p-4">
+      <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {STATUS_ITEMS.map((item) => {
           const Icon = item.icon;
           const itemStatus = item.getStatus(status);
           return (
-            <div key={item.key} className="flex items-center gap-3 rounded-xl border border-border/50 bg-background/60 px-3 py-2.5">
-              <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg bg-brand/10 text-brand")}>
+            <div key={item.key} className="flex items-center gap-2.5 sm:gap-3 rounded-xl border border-border/50 bg-background/60 px-3 py-2 sm:py-2.5">
+              <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand")}>
                 <Icon className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] text-muted-foreground">{item.label}</div>
-                <div className="text-sm font-medium">{item.getValue(status)}</div>
+                <div className="text-[11px] text-muted-foreground truncate">{item.label}</div>
+                <div className="text-sm font-medium truncate">{item.getValue(status)}</div>
               </div>
-              <span className={cn("h-2 w-2 rounded-full", DOT[itemStatus])} />
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", DOT[itemStatus])} />
             </div>
           );
         })}

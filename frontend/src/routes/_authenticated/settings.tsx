@@ -27,19 +27,23 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   return (
     <AppShell>
-      <Tabs defaultValue="clinic" className="space-y-6">
-        <TabsList className="flex flex-wrap gap-2 bg-transparent p-0">
-          <Tab value="clinic" icon={<Building2 className="h-4 w-4" />} label="Clinic" />
-          <Tab value="account" icon={<UserCog className="h-4 w-4" />} label="Account" />
-          <Tab value="theme" icon={<Palette className="h-4 w-4" />} label="Appearance" />
-          <Tab value="device" icon={<Cpu className="h-4 w-4" />} label="Device defaults" />
-        </TabsList>
+      <div className="p-3 sm:p-4 lg:p-6">
+        <Tabs defaultValue="clinic" className="space-y-6">
+          <div className="overflow-x-auto pb-1">
+            <TabsList className="inline-flex flex-nowrap sm:flex-wrap gap-2 bg-transparent p-0">
+              <Tab value="clinic" icon={<Building2 className="h-4 w-4" />} label="Clinic" />
+              <Tab value="account" icon={<UserCog className="h-4 w-4" />} label="Account" />
+              <Tab value="theme" icon={<Palette className="h-4 w-4" />} label="Appearance" />
+              <Tab value="device" icon={<Cpu className="h-4 w-4" />} label="Device defaults" />
+            </TabsList>
+          </div>
 
-        <TabsContent value="clinic"><ClinicSettings /></TabsContent>
-        <TabsContent value="account"><AccountSettings /></TabsContent>
-        <TabsContent value="theme"><ThemeSettings /></TabsContent>
-        <TabsContent value="device"><DeviceSettings /></TabsContent>
-      </Tabs>
+          <TabsContent value="clinic"><ClinicSettings /></TabsContent>
+          <TabsContent value="account"><AccountSettings /></TabsContent>
+          <TabsContent value="theme"><ThemeSettings /></TabsContent>
+          <TabsContent value="device"><DeviceSettings /></TabsContent>
+        </Tabs>
+      </div>
     </AppShell>
   );
 }

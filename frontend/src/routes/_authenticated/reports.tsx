@@ -81,41 +81,43 @@ function ReportsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <p className="text-sm text-muted-foreground">All clinic-branded PDF reports generated from completed tests.</p>
-      </div>
-      <div className="grid gap-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
-        {reports.length === 0 && (
-          <GlassCard>
-            <div className="text-sm text-muted-foreground">
-              No reports yet. Complete a test and generate a report from the dashboard.
-            </div>
-          </GlassCard>
-        )}
-        {sortedReports.map((r) => (
-          <GlassCard key={r.id} interactive>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="text-sm font-medium">Report OS-{r.id.slice(-8).toUpperCase()}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  {nameFor(r.patientId)} · generated {formatDateTime(r.generatedAt)}
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="mb-4 sm:mb-6">
+          <p className="text-sm text-muted-foreground">All clinic-branded PDF reports generated from completed tests.</p>
+        </div>
+        <div className="grid gap-3">
+          {reports.length === 0 && (
+            <GlassCard>
+              <div className="text-sm text-muted-foreground">
+                No reports yet. Complete a test and generate a report from the dashboard.
+              </div>
+            </GlassCard>
+          )}
+          {sortedReports.map((r) => (
+            <GlassCard key={r.id} interactive className="p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">Report OS-{r.id.slice(-8).toUpperCase()}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {nameFor(r.patientId)} · generated {formatDateTime(r.generatedAt)}
+                  </div>
+                  {r.aiAnalysis && <div className="mt-2 text-xs italic text-muted-foreground">{r.aiAnalysis}</div>}
                 </div>
-                {r.aiAnalysis && <div className="mt-2 text-xs italic text-muted-foreground">{r.aiAnalysis}</div>}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <Button size="sm" onClick={() => downloadPdf(r.id)} className="bg-brand-gradient text-white hover:opacity-95">
+                    <Download className="mr-1 h-4 w-4" /> PDF
+                  </Button>
+                  <Button size="sm" onClick={() => downloadExcel(r.id)} variant="outline">
+                    <FileSpreadsheet className="mr-1 h-4 w-4" /> Excel
+                  </Button>
+                  <Button size="icon" variant="ghost" onClick={() => setConfirmDelete({ id: r.id, name: nameFor(r.patientId) })}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => downloadPdf(r.id)} className="bg-brand-gradient text-white hover:opacity-95">
-                  <Download className="mr-1 h-4 w-4" /> PDF
-                </Button>
-                <Button size="sm" onClick={() => downloadExcel(r.id)} variant="outline">
-                  <FileSpreadsheet className="mr-1 h-4 w-4" /> Excel
-                </Button>
-                <Button size="icon" variant="ghost" onClick={() => setConfirmDelete({ id: r.id, name: nameFor(r.patientId) })}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </div>
-          </GlassCard>
-        ))}
+            </GlassCard>
+          ))}
+        </div>
       </div>
 
       <AlertDialog open={!!confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(null)}>

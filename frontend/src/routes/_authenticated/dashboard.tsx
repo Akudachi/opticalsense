@@ -179,27 +179,27 @@ function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto">
+      <div className="flex flex-col p-3 sm:p-4 lg:p-6 gap-3 sm:gap-4">
         <StatusStrip status={status} />
 
         <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
           <div className="flex flex-col gap-3">
-            <div className="grid gap-2 grid-cols-3">
+            <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               <SensorCard label="SpO₂" value={latest?.spo2 ?? 0} decimals={1} suffix="%" icon={HeartPulse} tint="brand" samples={displaySamples} metricKey="spo2" hint="Peripheral oxygen saturation" />
               <SensorCard label="Pulse" value={latest?.heartRate ?? 0} suffix=" bpm" icon={Activity} tint="teal" samples={displaySamples} metricKey="heartRate" hint="Heart rate" />
               <SensorCard label="Temperature" value={latest?.temperature ?? 0} decimals={2} suffix=" °C" icon={Thermometer} tint="amber" samples={displaySamples} metricKey="temperature" hint="Ambient / probe" />
             </div>
-            <div className="grid gap-2 grid-cols-3">
+            <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               <SensorCard label="Signal Quality" value={latest?.signalQuality ?? 0} suffix="%" icon={Waves} tint="rose" samples={displaySamples} metricKey="signalQuality" hint="Signal quality" />
               <SensorCard label="Vitality Index" value={latest?.vitalityIndex ?? 0} decimals={1} icon={Waves} tint="brand" samples={displaySamples} metricKey="vitalityIndex" hint="Vitality index" />
               <SensorCard label="Battery" value={latest?.battery ?? 0} suffix="%" icon={Battery} tint="teal" samples={displaySamples} metricKey="battery" hint="Device battery" />
             </div>
 
-            <div className="h-96">
+            <div className="w-full">
               <LiveWaveform samples={displaySamples} />
             </div>
 
-            <div className="grid gap-2 grid-cols-2">
+            <div className="grid gap-2 grid-cols-1 sm:grid-cols-2">
               <SignalQuality latest={latest} />
               <GlassCard>
                 <div className="text-xs text-muted-foreground">Measurement Confidence</div>

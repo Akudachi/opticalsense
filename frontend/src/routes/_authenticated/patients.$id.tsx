@@ -29,13 +29,14 @@ function PatientDetailPage() {
 
   return (
     <AppShell>
-      <Link to="/patients" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> All patients
-      </Link>
-      {!patient ? (
-        <div className="text-sm text-muted-foreground">Patient not found.</div>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <div className="p-3 sm:p-4 lg:p-6">
+        <Link to="/patients" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> All patients
+        </Link>
+        {!patient ? (
+          <div className="text-sm text-muted-foreground">Patient not found.</div>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           <GlassCard>
             <div className="font-display text-2xl font-semibold">{patient.fullName}</div>
             <div className="mt-1 text-sm text-muted-foreground">
@@ -96,6 +97,7 @@ function PatientDetailPage() {
           </div>
         </div>
       )}
+      </div>
     </AppShell>
   );
 }

@@ -60,63 +60,65 @@ function DevicesPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Paired ESP32 devices and their health.</p>
-        <Button onClick={() => setPairOpen(true)} className="bg-brand-gradient text-white hover:opacity-95">
-          <Plus className="mr-1 h-4 w-4" /> Pair device
-        </Button>
-      </div>
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Paired ESP32 devices and their health.</p>
+          <Button onClick={() => setPairOpen(true)} className="bg-brand-gradient text-white hover:opacity-95 shrink-0">
+            <Plus className="mr-1 h-4 w-4" /> Pair device
+          </Button>
+        </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {devices.map((d) => (
-          <GlassCard key={d.id}>
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-brand" />
-                  <div className="font-medium">{d.name}</div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {devices.map((d) => (
+            <GlassCard key={d.id} className="p-4 sm:p-5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-brand" />
+                    <div className="font-medium">{d.name}</div>
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{d.deviceId} · fw {d.firmware}</div>
                 </div>
-                <div className="mt-0.5 text-xs text-muted-foreground">{d.deviceId} · fw {d.firmware}</div>
+                <Badge className={d.online ? "bg-teal/15 text-teal" : "bg-muted text-muted-foreground"}>
+                  {d.online ? "Online" : "Offline"}
+                </Badge>
               </div>
-              <Badge className={d.online ? "bg-teal/15 text-teal" : "bg-muted text-muted-foreground"}>
-                {d.online ? "Online" : "Offline"}
-              </Badge>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-              <Stat icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={d.wifi?.connected ? `${d.wifi.rssi} dBm` : "—"} />
-              <Stat icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${d.batteryPct ?? 0}%`} />
-              <Stat icon={<Cpu className="h-3.5 w-3.5" />} label="MQTT" value={d.mqtt ?? "unknown"} />
-            </div>
-            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Last seen {formatDistanceToNowStrict(new Date(d.lastSeen), { addSuffix: true })}</span>
-              <div className="flex items-center gap-1">
-                <Button size="icon" variant="ghost" onClick={() => refreshMut.mutate(d.id)}>
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-                {!d.online && (
-                  <Button size="icon" variant="ghost" onClick={() => repairMut.mutate(d.id)} title="Repair device">
-                    <Wrench className="h-3.5 w-3.5 text-amber-500" />
+              <div className="mt-4 grid grid-cols-3 gap-1.5 sm:gap-2 text-center">
+                <Stat icon={<Wifi className="h-3.5 w-3.5" />} label="WiFi" value={d.wifi?.connected ? `${d.wifi.rssi} dBm` : "—"} />
+                <Stat icon={<Battery className="h-3.5 w-3.5" />} label="Battery" value={`${d.batteryPct ?? 0}%`} />
+                <Stat icon={<Cpu className="h-3.5 w-3.5" />} label="MQTT" value={d.mqtt ?? "unknown"} />
+              </div>
+              <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                <span>Last seen {formatDistanceToNowStrict(new Date(d.lastSeen), { addSuffix: true })}</span>
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant="ghost" onClick={() => refreshMut.mutate(d.id)}>
+                    <RefreshCw className="h-3.5 w-3.5" />
                   </Button>
-                )}
-                <Button size="icon" variant="ghost" onClick={() => removeMut.mutate(d.id)}>
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
+                  {!d.online && (
+                    <Button size="icon" variant="ghost" onClick={() => repairMut.mutate(d.id)} title="Repair device">
+                      <Wrench className="h-3.5 w-3.5 text-amber-500" />
+                    </Button>
+                  )}
+                  <Button size="icon" variant="ghost" onClick={() => removeMut.mutate(d.id)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
               </div>
-            </div>
-          </GlassCard>
-        ))}
-      </div>
+            </GlassCard>
+          ))}
+        </div>
 
-      <PairDialog open={pairOpen} onOpenChange={setPairOpen} />
+        <PairDialog open={pairOpen} onOpenChange={setPairOpen} />
+      </div>
     </AppShell>
   );
 }
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border/50 bg-background/60 p-2">
+    <div className="rounded-lg border border-border/50 bg-background/60 p-1.5 sm:p-2">
       <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground">{icon}<span>{label}</span></div>
-      <div className="mt-0.5 text-sm font-medium capitalize">{value}</div>
+      <div className="mt-0.5 text-xs sm:text-sm font-medium capitalize truncate">{value}</div>
     </div>
   );
 }
@@ -137,7 +139,7 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Pair a new device</DialogTitle>
           <DialogDescription>

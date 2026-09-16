@@ -85,91 +85,95 @@ function PatientsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-xs text-muted-foreground">{total} patients</div>
-          <p className="text-sm text-muted-foreground">Manage clinical records and pulp assessment history.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name, phone, tooth…"
-              className="w-64 pl-8"
-              value={search}
-              onChange={(e) => {
-                setPage(1);
-                setSearch(e.target.value);
-              }}
-            />
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-muted-foreground">{total} patients</div>
+            <p className="text-sm text-muted-foreground">Manage clinical records and pulp assessment history.</p>
           </div>
-          <Button onClick={() => { setEditing(undefined); setDialogOpen(true); }} className="bg-brand-gradient text-white hover:opacity-95">
-            <Plus className="mr-1 h-4 w-4" /> Add patient
-          </Button>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1 sm:w-64">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, phone, tooth…"
+                className="w-full pl-8"
+                value={search}
+                onChange={(e) => {
+                  setPage(1);
+                  setSearch(e.target.value);
+                }}
+              />
+            </div>
+            <Button onClick={() => { setEditing(undefined); setDialogOpen(true); }} className="bg-brand-gradient text-white hover:opacity-95 shrink-0">
+              <Plus className="mr-1 h-4 w-4" /> Add patient
+            </Button>
+          </div>
         </div>
-      </div>
 
-      <GlassCard padded={false} className="max-h-[calc(100vh-200px)] overflow-y-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Patient</TableHead>
-              <TableHead>Age · Sex</TableHead>
-              <TableHead>Tooth</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
-                  No patients found.
-                </TableCell>
-              </TableRow>
-            )}
-            {items.map((p) => (
-              <TableRow key={p.id} className="align-middle">
-                <TableCell>
-                  <Link to="/patients/$id" params={{ id: p.id }} className="font-medium hover:underline">
-                    {p.fullName}
-                  </Link>
-                  {p.medicalNotes && (
-                    <div className="mt-0.5 line-clamp-1 max-w-md text-xs text-muted-foreground">{p.medicalNotes}</div>
-                  )}
-                </TableCell>
-                <TableCell className="text-sm">{calcAge(p.dateOfBirth)} · <span className="capitalize">{p.sex}</span></TableCell>
-                <TableCell className="text-sm">{p.toothOfInterest ?? "—"}</TableCell>
-                <TableCell className="text-sm">
-                  <div>{p.phone}</div>
-                  {p.email && <div className="text-xs text-muted-foreground">{p.email}</div>}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{formatDate(p.updatedAt)}</TableCell>
-                <TableCell className="text-right">
-                  <Button size="icon" variant="ghost" onClick={() => { setEditing(p); setDialogOpen(true); }}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => setConfirmDelete(p)}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <div className="flex items-center justify-between border-t border-border/60 px-4 py-3 text-sm text-muted-foreground">
-          <div>Page {page} of {pageCount}</div>
-          <div className="flex items-center gap-1">
-            <Button size="icon" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button size="icon" variant="ghost" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+        <GlassCard padded={false} className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[640px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Patient</TableHead>
+                  <TableHead>Age · Sex</TableHead>
+                  <TableHead>Tooth</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+                      No patients found.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {items.map((p) => (
+                  <TableRow key={p.id} className="align-middle">
+                    <TableCell>
+                      <Link to="/patients/$id" params={{ id: p.id }} className="font-medium hover:underline">
+                        {p.fullName}
+                      </Link>
+                      {p.medicalNotes && (
+                        <div className="mt-0.5 line-clamp-1 max-w-md text-xs text-muted-foreground">{p.medicalNotes}</div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">{calcAge(p.dateOfBirth)} · <span className="capitalize">{p.sex}</span></TableCell>
+                    <TableCell className="text-sm">{p.toothOfInterest ?? "—"}</TableCell>
+                    <TableCell className="text-sm">
+                      <div>{p.phone}</div>
+                      {p.email && <div className="text-xs text-muted-foreground">{p.email}</div>}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDate(p.updatedAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button size="icon" variant="ghost" onClick={() => { setEditing(p); setDialogOpen(true); }}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => setConfirmDelete(p)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-        </div>
-      </GlassCard>
+          <div className="flex items-center justify-between border-t border-border/60 px-4 py-3 text-sm text-muted-foreground">
+            <div>Page {page} of {pageCount}</div>
+            <div className="flex items-center gap-1">
+              <Button size="icon" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="ghost" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </div>
 
       <PatientDialog
         open={dialogOpen}

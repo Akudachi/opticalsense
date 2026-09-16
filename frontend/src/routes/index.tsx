@@ -62,15 +62,15 @@ function SplashScreen() {
         </motion.div>
 
         <motion.div
-          className="flex flex-col items-center gap-2"
+          className="flex flex-col items-center gap-2 px-4 text-center"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.6 }}
         >
-          <h1 className="font-display text-4xl font-semibold tracking-tight">
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">
             Optical<span className="text-brand-gradient">Sense</span>
           </h1>
-          <p className="text-sm text-muted-foreground">Cloud Pulp Vitality Monitoring</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Cloud Pulp Vitality Monitoring</p>
         </motion.div>
 
         <motion.div

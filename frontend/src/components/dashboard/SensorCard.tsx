@@ -72,21 +72,21 @@ export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tin
   const latestSample = samples?.[samples.length - 1];
   
   return (
-    <GlassCard interactive>
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-xs text-muted-foreground">{label}</div>
-          <div className="mt-1 font-display text-3xl font-semibold tracking-tight">
+    <GlassCard interactive className="p-3.5 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs text-muted-foreground truncate">{label}</div>
+          <div className="mt-1 font-display text-2xl sm:text-3xl font-semibold tracking-tight truncate">
             <CountUp value={value} decimals={decimals} suffix={suffix} className={statusColors.fg} />
           </div>
-          {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+          {hint && <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">{hint}</div>}
         </div>
-        <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl", statusColors.bg)}>
+        <div className={cn("flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl", statusColors.bg)}>
           <Icon className={cn("h-4 w-4", statusColors.fg)} />
         </div>
       </div>
       {data.length > 1 && (
-        <div className="mt-3 h-10">
+        <div className="mt-3 h-8 sm:h-10">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
               <defs>

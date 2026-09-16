@@ -54,7 +54,7 @@ export function PatientDialog({ open, onOpenChange, patient, onSubmit }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{patient ? "Edit patient" : "Add patient"}</DialogTitle>
           <DialogDescription>
@@ -71,7 +71,7 @@ export function PatientDialog({ open, onOpenChange, patient, onSubmit }: Props) 
           <Field label="Full name" error={form.formState.errors.fullName?.message}>
             <Input {...form.register("fullName")} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Date of birth" error={form.formState.errors.dateOfBirth?.message}>
               <Input type="date" {...form.register("dateOfBirth")} />
             </Field>
