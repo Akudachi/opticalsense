@@ -461,14 +461,16 @@ void setup() {
   
   // Initialize Watchdog
   // esp_task_wdt API is consistent across ESP32 Arduino Core 2.x and 3.x (ESP-IDF based)
-  esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 120000, // Increased to 120 seconds for MQTT TLS connection
-    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
-    .trigger_panic = true
-};
-
-esp_task_wdt_init(&wdt_config);
-esp_task_wdt_add(NULL);
+  // Check if already initialized to avoid "TWDT already initialized" warning
+  if (esp_task_wdt_is_initialized() == false) {
+    esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 120000, // Increased to 120 seconds for MQTT TLS connection
+      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+      .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+  }
+  esp_task_wdt_add(NULL);
   
   // Initialize random seed for pairing code generation
   randomSeed(esp_random());
@@ -478,6 +480,8 @@ esp_task_wdt_add(NULL);
   
   // Initialize I2C
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(100000); // Set stable 100kHz I2C clock
+  Wire.setTimeout(1000); // Set 1 second timeout for I2C operations to prevent blocking
   
   // Run Self-Test
   currentState = STATE_SELF_TEST;
@@ -713,6 +717,7 @@ bool testOLED() {
 bool testMAX30100() {
   // Passive I2C scan at MAX30100 native address (0x57) to avoid double initialization
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setTimeout(1000); // Set 1 second timeout for I2C operations
   Wire.beginTransmission(0x57);
   byte error = Wire.endTransmission();
   return (error == 0); // Device found if no error
@@ -796,11 +801,16 @@ void initializeMAX30100() {
   // Check I2C bus by scanning
   Serial.println(F("Scanning I2C bus..."));
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setTimeout(1000); // Set 1 second timeout for I2C operations
   byte error, address;
   int nDevices = 0;
   for(address = 1; address < 127; address++ ) {
     Wire.beginTransmission(address);
     error = Wire.endTransmission();
+    // Feed watchdog every 16 addresses to prevent timeout during scan
+    if (address % 16 == 0) {
+      esp_task_wdt_reset();
+    }
     if (error == 0) {
       Serial.print(F("I2C device found at address 0x"));
       if (address < 16) Serial.print("0");
@@ -1840,10 +1850,18 @@ void updateMAX30100() {
   
   uint16_t irValue, redValue;
   bool gotAnySample = false;
-  while (sensor.getRawValues(&irValue, &redValue)) {
+  int maxSamplesPerLoop = 100; // Limit samples per loop iteration to prevent blocking
+  int samplesProcessed = 0;
+  while (sensor.getRawValues(&irValue, &redValue) && samplesProcessed < maxSamplesPerLoop) {
     gotAnySample = true;
+    samplesProcessed++;
     samplesThisWindow++;
     unsigned long now = millis();
+    
+    // Feed watchdog every 50 samples to prevent timeout
+    if (samplesProcessed % 50 == 0) {
+      esp_task_wdt_reset();
+    }
     
     // --- Saturation check (probe pressed too hard / LED current too high) ---
     sensorSaturated = (irValue >= 65000 || redValue >= 65000);
@@ -1942,6 +1960,9 @@ void updateMAX30100() {
     }
     prevIrLowPass = irLowPass;
   }
+  
+  // Feed watchdog after processing samples to prevent timeout
+  esp_task_wdt_reset();
   
   // --- Stuck-FIFO recovery ---
   // This library's FIFO is only 16 samples deep (~160ms at 100Hz). If a loop
