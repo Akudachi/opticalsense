@@ -1830,6 +1830,12 @@ void runTestSampling() {
 // not the fingertip-tuned PulseOximeter beat detector)
 // ============================================================
 void updateMAX30100() {
+  // Feed watchdog at the very start to prevent timeout during setup
+  // sensorSafeDelay() calls this function repeatedly during WiFi connection,
+  // but currentState < STATE_READY during setup, so we return early.
+  // Without this reset, the watchdog would timeout during long WiFi operations.
+  esp_task_wdt_reset();
+  
   // Only update sensor if it's been initialized to prevent crashes
   if (currentState < STATE_READY) {
     return; // Skip sensor updates before initialization
