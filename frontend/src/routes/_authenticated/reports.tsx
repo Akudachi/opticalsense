@@ -54,7 +54,7 @@ function getReportReading(
     return {
       reading: reportReading,
       isValid: reportReading.valid && reportReading.spo2 > 0 && reportReading.heartRate > 0,
-      errorMessage: reportReading.valid ? null : (reportReading.errorMessage || "No valid reading after 20 s. Retry and keep the probe steady."),
+      errorMessage: reportReading.valid ? null : (reportReading.errorMessage || "Not enough valid readings. Keep the probe steady and run the test longer."),
     };
   }
 
@@ -62,7 +62,7 @@ function getReportReading(
     return {
       reading: test.reportReading,
       isValid: test.reportReading.valid && test.reportReading.spo2 > 0 && test.reportReading.heartRate > 0,
-      errorMessage: test.reportReading.valid ? null : (test.reportReading.errorMessage || "No valid reading after 20 s. Retry and keep the probe steady."),
+      errorMessage: test.reportReading.valid ? null : (test.reportReading.errorMessage || "Not enough valid readings. Keep the probe steady and run the test longer."),
     };
   }
 
@@ -82,6 +82,7 @@ function getReportReading(
         vitalityIndex: validPost20s.vitalityIndex,
         testDuration: validPost20s.testDuration ?? 20000,
         timestamp: validPost20s.timestamp,
+        validReadings: test.summary.validReadings ?? 5,
       };
       return { reading, isValid: true, errorMessage: null };
     }
@@ -90,7 +91,7 @@ function getReportReading(
   return {
     reading: null,
     isValid: false,
-    errorMessage: "No valid reading after 20 s. Retry and keep the probe steady.",
+    errorMessage: "Not enough valid readings. Keep the probe steady and run the test longer.",
   };
 }
 
@@ -228,12 +229,12 @@ function ReportsPage() {
                           <span className="font-semibold text-foreground">{reading.signalQuality}%</span>
                         </div>
 
-                        {/* Timing */}
+                        {/* Timing / Sample count */}
                         <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-muted/30 px-2.5 py-1 text-xs">
                           <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-muted-foreground">Stabilized at:</span>
+                          <span className="text-muted-foreground">Post-20s Averages:</span>
                           <span className="font-mono font-medium text-foreground">
-                            {(reading.testDuration / 1000).toFixed(1)}s
+                            {reading.validReadings ? `${reading.validReadings} valid samples` : `${(reading.testDuration / 1000).toFixed(1)}s`}
                           </span>
                         </div>
 
@@ -254,7 +255,7 @@ function ReportsPage() {
                     ) : (
                       <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-200">
                         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                        <span>{errorMessage || "No valid reading after 20 s. Retry and keep the probe steady."}</span>
+                        <span>{errorMessage || "Not enough valid readings. Keep the probe steady and run the test longer."}</span>
                       </div>
                     )}
 

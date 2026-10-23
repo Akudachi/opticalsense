@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatDuration } from "@/utils/format";
-import type { DeviceResultPayload } from "@/types";
+import type { DeviceResultPayload, ReportReading } from "@/types";
 import {
   Activity,
   AlertTriangle,
@@ -26,6 +26,7 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   result: DeviceResultPayload | null;
+  reportReading?: ReportReading | null;
   patientName?: string;
   tooth?: string;
   onGenerateReport?: () => void;
@@ -36,21 +37,33 @@ export function TestResultDialog({
   open,
   onOpenChange,
   result,
+  reportReading,
   patientName,
   tooth,
   onGenerateReport,
   onRetry,
 }: Props) {
-  if (!result) return null;
+  if (!result && !reportReading) return null;
 
-  const isValid = result.valid;
-  const durationSec = result.durationMs ? Math.round(result.durationMs / 1000) : 0;
-  const spo2 = result.finalSpo2 ?? result.spo2 ?? 0;
-  const hr = result.finalHeartRate ?? result.heartRate ?? 0;
-  const temp = result.finalTemperature ?? result.temperature ?? 0;
+  const isValid = reportReading !== undefined && reportReading !== null
+    ? reportReading.valid
+    : (result?.valid ?? false);
 
-  const isVital = result.vitalityStatus?.toLowerCase().includes("vital") && !result.vitalityStatus?.toLowerCase().includes("non");
-  const isNonVital = result.vitalityStatus?.toLowerCase().includes("non");
+  const durationSec = reportReading?.testDuration
+    ? Math.round(reportReading.testDuration / 1000)
+    : (result?.durationMs ? Math.round(result.durationMs / 1000) : 0);
+
+  const spo2 = reportReading?.valid ? reportReading.spo2 : (result?.finalSpo2 ?? result?.spo2 ?? 0);
+  const hr = reportReading?.valid ? reportReading.heartRate : (result?.finalHeartRate ?? result?.heartRate ?? 0);
+  const temp = reportReading?.valid ? reportReading.temperature : (result?.finalTemperature ?? result?.temperature ?? 0);
+  const signalQuality = reportReading?.valid ? reportReading.signalQuality : (result?.signalQuality ?? 0);
+  const vitalityStatus = reportReading?.valid ? reportReading.vitalityStatus : (result?.vitalityStatus || "Inconclusive");
+  const vitalityIndex = reportReading?.vitalityIndex ?? result?.vitalityIndex;
+  const validReadings = reportReading?.validReadings ?? result?.validReadings ?? 0;
+
+  const statusLower = (vitalityStatus || "").toLowerCase();
+  const isVital = statusLower.includes("vital") && !statusLower.includes("non");
+  const isNonVital = statusLower.includes("non");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -68,7 +81,7 @@ export function TestResultDialog({
             )}
             <div>
               <DialogTitle className="text-lg font-semibold">
-                {isValid ? "Test Completed" : "No valid reading, check probe contact and retry"}
+                {isValid ? "Test Completed (Stabilized Averages)" : "Not enough valid readings. Keep the probe steady and run the test longer."}
               </DialogTitle>
               <DialogDescription className="text-xs">
                 {patientName ? `Patient: ${patientName}` : "Patient Session"}
@@ -86,7 +99,7 @@ export function TestResultDialog({
               <div>
                 <div className="text-xs text-muted-foreground">Pulp Vitality Verdict</div>
                 <div className="mt-1 font-display text-xl font-bold tracking-tight capitalize">
-                  {result.vitalityStatus || "Inconclusive"}
+                  {vitalityStatus || "Inconclusive"}
                 </div>
               </div>
               <Badge
@@ -113,7 +126,7 @@ export function TestResultDialog({
                 <div className="mt-1.5 font-display text-2xl font-bold text-brand">
                   {spo2 > 0 ? `${spo2.toFixed(1)}%` : "--"}
                 </div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">Oxygen Perfusion</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">Stabilized perfusion</div>
               </div>
 
               <div className="rounded-xl border border-border/50 bg-card/60 p-3">
@@ -144,7 +157,7 @@ export function TestResultDialog({
                   Signal Quality
                 </div>
                 <div className="mt-1.5 font-display text-2xl font-bold text-foreground">
-                  {result.signalQuality ?? 0}%
+                  {Math.round(signalQuality)}%
                 </div>
                 <div className="mt-0.5 text-[10px] text-muted-foreground">SNR index</div>
               </div>
@@ -155,9 +168,9 @@ export function TestResultDialog({
                   Vitality Index
                 </div>
                 <div className="mt-1.5 font-display text-2xl font-bold text-brand">
-                  {(result.vitalityIndex ?? 0).toFixed(1)}
+                  {vitalityIndex !== undefined ? vitalityIndex.toFixed(1) : "—"}
                 </div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">Relative ratio</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">Optical ratio</div>
               </div>
 
               <div className="rounded-xl border border-border/50 bg-card/60 p-3">
@@ -166,27 +179,27 @@ export function TestResultDialog({
                   Valid Readings
                 </div>
                 <div className="mt-1.5 font-display text-2xl font-bold text-foreground">
-                  {result.validReadings ?? 0}
+                  {validReadings}
                 </div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">Averaged samples</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">Samples since 20s</div>
               </div>
             </div>
           </div>
         ) : (
           <div className="space-y-3.5 py-2">
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
-              <div className="font-semibold text-base mb-1">Insufficient Signal Data</div>
+              <div className="font-semibold text-base mb-1">Not enough valid readings</div>
               <p className="text-xs leading-relaxed opacity-90">
-                The device was unable to register sufficient clean optical pulses. This commonly happens if the optical sensor probe was not securely held against the enamel or if excessive motion occurred.
+                Not enough valid readings. Keep the probe steady and run the test longer.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
-                <span className="rounded-md bg-amber-500/20 px-2 py-0.5">Duration: {formatDuration(durationSec)}</span>
-                <span className="rounded-md bg-amber-500/20 px-2 py-0.5">Valid Readings: {result.validReadings ?? 0}</span>
+                <span className="rounded-md bg-amber-500/20 px-2 py-0.5">Test Duration: {formatDuration(durationSec)}</span>
+                <span className="rounded-md bg-amber-500/20 px-2 py-0.5">Valid Readings After 20s: {validReadings} (min 5 required)</span>
               </div>
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Please reposition the probe tip securely against the labial/buccal surface of the tooth and click Retry Test.
+              Please ensure the sensor probe maintains steady optical contact on the tooth crown past the 20-second stabilization period before clicking Stop.
             </p>
           </div>
         )}

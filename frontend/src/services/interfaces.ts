@@ -46,6 +46,7 @@ export interface ITestService {
       toothOfInterest?: string;
       observations?: string;
       reportReading?: ReportReading;
+      samples?: SensorSample[];
     }
   ): Promise<Test>;
   update(id: string, input: Partial<Test>): Promise<Test>;

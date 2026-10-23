@@ -10,8 +10,8 @@ type Args = {
 };
 
 /**
- * Generates an Excel report using ONLY the stabilized reading taken after the first 20 seconds.
- * Earlier readings and 5-second intervals are omitted per firmware v3.7.0 requirements.
+ * Generates an Excel report using the frozen running averages since 20 seconds.
+ * Warm-up samples (< 20s) and /result device-wide averages are excluded per firmware v3.7.0 rules.
  */
 export async function generateReportExcel({ test, patient, clinic, report }: Args): Promise<void> {
   const reading = report?.reading ?? test.reportReading;
@@ -30,26 +30,25 @@ export async function generateReportExcel({ test, patient, clinic, report }: Arg
     ["Device ID", test.deviceId],
     ["Test Started", formatDateTime(test.startedAt)],
     ["Test Ended", test.endedAt ? formatDateTime(test.endedAt) : ""],
-    ["Assessment Protocol", "Stabilized optical reading taken after first 20 seconds"],
+    ["Assessment Protocol", "Continuous running averages calculated strictly from 20 seconds onward"],
     [""],
   ];
 
   if (isValid && reading) {
-    const readingTimeSec = (reading.testDuration / 1000).toFixed(1);
     sensorData.push([
       "Timestamp",
-      "Stabilization Time (sec)",
-      "Heart Rate (bpm)",
-      "SpO₂ (%)",
-      "Temperature (°C)",
-      "Signal Quality",
+      "Valid Readings Count",
+      "Heart Rate Average (bpm)",
+      "SpO₂ Average (%)",
+      "Temperature Average (°C)",
+      "Signal Quality Average",
       "Vitality Status",
       "Vitality Index",
     ]);
 
     sensorData.push([
       reading.timestamp,
-      readingTimeSec,
+      reading.validReadings ?? 5,
       reading.heartRate,
       reading.spo2,
       reading.temperature,
@@ -64,7 +63,7 @@ export async function generateReportExcel({ test, patient, clinic, report }: Arg
     ]);
     sensorData.push([
       "INVALID",
-      "No valid reading after 20 s. Retry and keep the probe steady.",
+      "Not enough valid readings. Keep the probe steady and run the test longer.",
     ]);
   }
 

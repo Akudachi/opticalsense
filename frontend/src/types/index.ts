@@ -134,16 +134,36 @@ export type TestSummary = {
   validReadings?: number;
 };
 
+export type RunningReportStats = {
+  count: number;
+  sumSpo2: number;
+  sumHeartRate: number;
+  sumTemperature: number;
+  sumSignalQuality: number;
+  currentSpo2: number;
+  currentHeartRate: number;
+  currentTemperature: number;
+  currentSignalQuality: number;
+  vitalityStatus: string;
+  vitalityIndex?: number;
+  lastTestDuration: number;
+};
+
 export type ReportReading = {
   valid: boolean;
-  spo2: number;
-  heartRate: number;
-  temperature: number;
-  signalQuality: number;
+  spo2: number; // running average since 20s
+  heartRate: number; // running average since 20s
+  temperature: number; // running average since 20s
+  signalQuality: number; // running average since 20s
   vitalityStatus: string;
   vitalityIndex?: number;
   testDuration: number; // in milliseconds (from telemetry.testDuration)
   timestamp: string; // ISO date
+  validReadings?: number; // count of valid samples collected after 20s
+  currentSpo2?: number;
+  currentHeartRate?: number;
+  currentTemperature?: number;
+  currentSignalQuality?: number;
   errorMessage?: string;
 };
 

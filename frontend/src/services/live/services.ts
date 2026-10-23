@@ -503,13 +503,19 @@ export const liveTests: ITestService = {
     const nowIso = new Date().toISOString();
     const index = tests.findIndex(t => t.id === id);
 
-    const avgSpO2 = result.finalSpo2 ?? result.spo2 ?? 0;
-    const avgPulse = result.finalHeartRate ?? result.heartRate ?? 0;
-    const avgTemp = result.finalTemperature ?? result.temperature ?? 0;
-    const durationSec = result.durationMs ? Math.round(result.durationMs / 1000) : 0;
+    const reading = metadata?.reportReading;
+    const avgSpO2 = reading?.valid ? reading.spo2 : (result.finalSpo2 ?? result.spo2 ?? 0);
+    const avgPulse = reading?.valid ? reading.heartRate : (result.finalHeartRate ?? result.heartRate ?? 0);
+    const avgTemp = reading?.valid ? reading.temperature : (result.finalTemperature ?? result.temperature ?? 0);
+    const signalQuality = reading?.valid ? reading.signalQuality : (result.signalQuality ?? 0);
+    const vitalityStatus = reading?.valid ? reading.vitalityStatus : result.vitalityStatus;
+    const durationSec = reading?.testDuration
+      ? Math.round(reading.testDuration / 1000)
+      : (result.durationMs ? Math.round(result.durationMs / 1000) : 0);
+    const validReadings = reading?.validReadings ?? result.validReadings ?? 0;
 
     let verdict: Test['pulpVerdict'] = 'inconclusive';
-    const statusLower = (result.vitalityStatus || '').toLowerCase();
+    const statusLower = (vitalityStatus || '').toLowerCase();
     if (statusLower.includes('non')) {
       verdict = 'non_vital';
     } else if (statusLower.includes('vital')) {
@@ -522,17 +528,19 @@ export const liveTests: ITestService = {
       avgTemp,
       minSpO2: avgSpO2,
       maxPulse: avgPulse,
-      signalQuality: result.signalQuality ?? 0,
-      confidence: (result.signalQuality ?? 0) > 75 ? 'high' : (result.signalQuality ?? 0) > 40 ? 'medium' : 'low',
+      signalQuality,
+      confidence: signalQuality > 75 ? 'high' : signalQuality > 40 ? 'medium' : 'low',
       durationSec,
-      vitalityIndex: result.vitalityIndex,
-      vitalityStatus: result.vitalityStatus,
-      valid: result.valid,
-      validReadings: result.validReadings,
+      vitalityIndex: reading?.vitalityIndex ?? result.vitalityIndex,
+      vitalityStatus,
+      valid: reading ? reading.valid : result.valid,
+      validReadings,
     };
 
     let test: Test;
-    const post20sSamples: SensorSample[] = metadata?.reportReading?.valid
+    const post20sSamples: SensorSample[] = metadata?.samples && metadata.samples.length > 0
+      ? metadata.samples
+      : metadata?.reportReading?.valid
       ? [
           {
             deviceId: result.deviceId || metadata?.deviceId || 'device-1',
@@ -556,7 +564,7 @@ export const liveTests: ITestService = {
         status: 'completed',
         summary,
         pulpVerdict: verdict,
-        valid: result.valid,
+        valid: summary.valid,
         reportReading: metadata?.reportReading,
         samples: post20sSamples,
       };
@@ -579,7 +587,7 @@ export const liveTests: ITestService = {
         summary,
         observations: metadata?.observations || '',
         pulpVerdict: verdict,
-        valid: result.valid,
+        valid: summary.valid,
         reportReading: metadata?.reportReading,
       };
       tests.push(test);
@@ -689,6 +697,7 @@ export const liveReports: IReportService = {
           vitalityIndex: validSample.vitalityIndex,
           testDuration: validSample.testDuration ?? 20000,
           timestamp: validSample.timestamp,
+          validReadings: test.summary.validReadings ?? 5,
         };
       } else {
         reportReading = {
@@ -700,7 +709,8 @@ export const liveReports: IReportService = {
           vitalityStatus: 'Inconclusive',
           testDuration: 0,
           timestamp: new Date().toISOString(),
-          errorMessage: 'No valid reading after 20 s. Retry and keep the probe steady.',
+          validReadings: 0,
+          errorMessage: 'Not enough valid readings. Keep the probe steady and run the test longer.',
         };
       }
     }

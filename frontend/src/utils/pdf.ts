@@ -10,7 +10,7 @@ type Args = {
   report?: Report;
 };
 
-/** Generates a clinic-branded PDF report using ONLY the stabilized reading taken after 20s. */
+/** Generates a clinic-branded PDF report using the frozen running averages since 20s. */
 export async function generateReportPdf({ test, patient, clinic, report }: Args): Promise<void> {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -65,24 +65,24 @@ export async function generateReportPdf({ test, patient, clinic, report }: Args)
 
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18;
 
-  // Test Reading Table (Using ONLY post-20s stabilized reading; no /result averages)
+  // Test Reading Table (Using running averages since 20s; no warm-up /result averages)
   const readingRows = isValid && reading
     ? [
         ["Test Started", formatDateTime(test.startedAt)],
-        ["Stabilization Protocol", "Reading captured after first 20 seconds"],
-        ["Captured At", `${(reading.testDuration / 1000).toFixed(1)} s into test`],
+        ["Assessment Protocol", "Continuous running averages since 20s stabilization"],
+        ["Valid Readings", `${reading.validReadings ?? 5} samples collected`],
         ["Device ID", test.deviceId],
-        ["SpO₂ (Perfusion)", `${reading.spo2} %`],
-        ["Pulse / Heart Rate", `${reading.heartRate} bpm`],
-        ["Temperature", `${reading.temperature} °C`],
-        ["Signal Quality", `${reading.signalQuality} / 100`],
+        ["SpO₂ (Running Average)", `${reading.spo2.toFixed(1)} %`],
+        ["Pulse / Heart Rate (Running Average)", `${Math.round(reading.heartRate)} bpm`],
+        ["Temperature (Running Average)", `${reading.temperature.toFixed(2)} °C`],
+        ["Signal Quality (Running Average)", `${Math.round(reading.signalQuality)} / 100`],
         ["Vitality Status", reading.vitalityStatus || "Vital"],
       ]
     : [
         ["Test Started", formatDateTime(test.startedAt)],
         ["Device ID", test.deviceId],
         ["Assessment Status", "INVALID"],
-        ["Observation", "No valid reading after 20 s. Retry and keep the probe steady."],
+        ["Clinical Notice", "Not enough valid readings. Keep the probe steady and run the test longer."],
       ];
 
   autoTable(doc, {
@@ -110,7 +110,7 @@ export async function generateReportPdf({ test, patient, clinic, report }: Args)
     doc.setTextColor(30);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text("Clinical Verdict (Post-20s Assessment)", margin + 12, y + 18);
+    doc.text("Clinical Verdict (Post-20s Stabilized Averages)", margin + 12, y + 18);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.text(verdictText, margin + 12, y + 34);
@@ -124,7 +124,7 @@ export async function generateReportPdf({ test, patient, clinic, report }: Args)
     doc.text("Reading Notice", margin + 12, y + 18);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("No valid reading after 20 s. Retry and keep the probe steady.", margin + 12, y + 34);
+    doc.text("Not enough valid readings. Keep the probe steady and run the test longer.", margin + 12, y + 34);
     y += 66;
   }
 
@@ -136,7 +136,7 @@ export async function generateReportPdf({ test, patient, clinic, report }: Args)
   y += 14;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  const obsText = test.observations || "Stabilized reading acquired after initial sensor stabilization period.";
+  const obsText = test.observations || "Continuous post-20s optical measurement acquired successfully.";
   const wrap = doc.splitTextToSize(obsText, pageW - margin * 2);
   doc.text(wrap, margin, y);
   y += wrap.length * 12 + 24;

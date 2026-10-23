@@ -10,7 +10,7 @@ import { GlassCard } from "@/components/common/GlassCard";
 import { useLiveSensors, useSystemStatus } from "@/hooks/useLiveSensors";
 import { getServices } from "@/services";
 import type { StreamOptions } from "@/services/interfaces";
-import type { DeviceResultPayload, ReportReading, SensorSample } from "@/types";
+import type { DeviceResultPayload, ReportReading, RunningReportStats, SensorSample } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -18,6 +18,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Battery,
+  Clock,
   HeartPulse,
   Thermometer,
   Waves,
@@ -56,6 +57,21 @@ function playChime(freq = 1000, duration = 0.25) {
   }
 }
 
+const initialReportStats: RunningReportStats = {
+  count: 0,
+  sumSpo2: 0,
+  sumHeartRate: 0,
+  sumTemperature: 0,
+  sumSignalQuality: 0,
+  currentSpo2: 0,
+  currentHeartRate: 0,
+  currentTemperature: 0,
+  currentSignalQuality: 0,
+  vitalityStatus: "Inconclusive",
+  vitalityIndex: undefined,
+  lastTestDuration: 0,
+};
+
 function DashboardPage() {
   const services = getServices();
   const qc = useQueryClient();
@@ -85,9 +101,12 @@ function DashboardPage() {
   const [latestResult, setLatestResult] = useState<DeviceResultPayload | null>(null);
   const [showResultDialog, setShowResultDialog] = useState(false);
   const [disconnectedAlert, setDisconnectedAlert] = useState(false);
+  const [liveReportStats, setLiveReportStats] = useState<RunningReportStats>({ ...initialReportStats });
+  const [finalReportReading, setFinalReportReading] = useState<ReportReading | null>(null);
 
   const samplesRef = useRef<SensorSample[]>([]);
-  const reportReadingRef = useRef<ReportReading | null>(null);
+  const reportStatsRef = useRef<RunningReportStats>({ ...initialReportStats });
+  const lastProcessedTelemetryRef = useRef<string | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTelemetryTimeRef = useRef<number>(Date.now());
   const runningRef = useRef(running);
@@ -137,73 +156,150 @@ function DashboardPage() {
       services.tests.discard(currentId);
     }
     setRunning(false);
+    runningRef.current = false;
     setFinishing(false);
+    finishingRef.current = false;
     setActiveTestId(null);
     activeTestIdRef.current = null;
     setStartedAt(null);
     setElapsed(0);
+    setFinalReportReading(null);
     setDisconnectedAlert(true);
     toast.error("Device disconnected");
   };
+
+  const finalizeTest = async (deviceResult?: DeviceResultPayload | null) => {
+    // Only finalize if a test was actually running or finishing
+    if (!runningRef.current && !finishingRef.current) return;
+
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = null;
+    }
+
+    setFinishing(false);
+    finishingRef.current = false;
+    setRunning(false);
+    runningRef.current = false;
+
+    const currentActiveTestId = activeTestIdRef.current;
+    const stats = reportStatsRef.current;
+    const currentDurationMs =
+      latest?.testDuration !== undefined && latest.testDuration > 0
+        ? latest.testDuration
+        : startedAt
+        ? Date.now() - startedAt
+        : stats.lastTestDuration;
+
+    // Rule 5: If the test is stopped before 20 s, or fewer than 5 valid samples were collected after 20 s,
+    // show "Not enough valid readings. Keep the probe steady and run the test longer." Do not save a record.
+    const hasEnoughReadings = currentDurationMs >= 20000 && stats.count >= 5;
+
+    if (hasEnoughReadings) {
+      const avgSpo2 = stats.sumSpo2 / stats.count;
+      const avgPulse = stats.sumHeartRate / stats.count;
+      const avgTemp = stats.sumTemperature / stats.count;
+      const avgSignalQuality = Math.round(stats.sumSignalQuality / stats.count);
+
+      const reportReading: ReportReading = {
+        valid: true,
+        spo2: Number(avgSpo2.toFixed(1)),
+        heartRate: Math.round(avgPulse),
+        temperature: Number(avgTemp.toFixed(2)),
+        signalQuality: avgSignalQuality,
+        vitalityStatus: stats.vitalityStatus || "Vital",
+        vitalityIndex: stats.vitalityIndex,
+        testDuration: stats.lastTestDuration || currentDurationMs,
+        timestamp: new Date().toISOString(),
+        validReadings: stats.count,
+        currentSpo2: stats.currentSpo2,
+        currentHeartRate: stats.currentHeartRate,
+        currentTemperature: stats.currentTemperature,
+        currentSignalQuality: stats.currentSignalQuality,
+      };
+
+      const recordPayload: DeviceResultPayload = {
+        deviceId: deviceId || "device-1",
+        completed: true,
+        valid: true,
+        spo2: reportReading.spo2,
+        heartRate: reportReading.heartRate,
+        temperature: reportReading.temperature,
+        signalQuality: reportReading.signalQuality,
+        vitalityIndex: reportReading.vitalityIndex ?? 1.0,
+        vitalityStatus: reportReading.vitalityStatus,
+        durationMs: reportReading.testDuration,
+        validReadings: reportReading.validReadings,
+        timestamp: Date.now(),
+      };
+
+      try {
+        const saved = await services.tests.saveResult(
+          currentActiveTestId || `test-${Date.now()}`,
+          recordPayload,
+          {
+            patientId,
+            deviceId,
+            toothOfInterest: tooth,
+            reportReading,
+            samples: samplesRef.current,
+          }
+        );
+        setLastCompletedTestId(saved.id);
+        setLatestResult(recordPayload);
+        setFinalReportReading(reportReading);
+        setShowResultDialog(true);
+        qc.invalidateQueries({ queryKey: ["tests"] });
+        toast.success("Test completed and saved to history");
+        playChime(1000, 0.3);
+      } catch (err) {
+        console.error("Failed to save test record:", err);
+        toast.error("Failed to save test record");
+      }
+    } else {
+      // Discard test if stopped before 20s or < 5 valid samples
+      if (currentActiveTestId) {
+        try {
+          await services.tests.discard(currentActiveTestId);
+        } catch (err) {
+          console.error("Failed to discard invalid test:", err);
+        }
+      }
+
+      const invalidReading: ReportReading = {
+        valid: false,
+        spo2: 0,
+        heartRate: 0,
+        temperature: 0,
+        signalQuality: 0,
+        vitalityStatus: "Inconclusive",
+        testDuration: stats.lastTestDuration || currentDurationMs,
+        timestamp: new Date().toISOString(),
+        validReadings: stats.count,
+        errorMessage: "Not enough valid readings. Keep the probe steady and run the test longer.",
+      };
+
+      setLastCompletedTestId(null);
+      setLatestResult(null);
+      setFinalReportReading(invalidReading);
+      setShowResultDialog(true);
+      toast.error("Not enough valid readings. Keep the probe steady and run the test longer.");
+    }
+
+    setActiveTestId(null);
+    activeTestIdRef.current = null;
+  };
+
+  const finalizeTestRef = useRef(finalizeTest);
+  finalizeTestRef.current = finalizeTest;
 
   // Stream callbacks for results, command acks, and offline events
   const streamOptions = useMemo<StreamOptions>(
     () => ({
       onResult: async (result) => {
-        console.log("Device result message received:", result);
-        if (stopTimeoutRef.current) {
-          clearTimeout(stopTimeoutRef.current);
-          stopTimeoutRef.current = null;
-        }
-
-        setFinishing(false);
-        setRunning(false);
-        setLatestResult(result);
-        setShowResultDialog(true);
-
-        const currentActiveTestId = activeTestIdRef.current;
-        const finalReportReading: ReportReading = reportReadingRef.current ?? {
-          valid: false,
-          spo2: 0,
-          heartRate: 0,
-          temperature: 0,
-          signalQuality: 0,
-          vitalityStatus: "Inconclusive",
-          testDuration: latest?.testDuration ?? 0,
-          timestamp: new Date().toISOString(),
-          errorMessage: "No valid reading after 20 s. Retry and keep the probe steady.",
-        };
-
-        if (result.valid) {
-          try {
-            const saved = await services.tests.saveResult(
-              currentActiveTestId || `test-${Date.now()}`,
-              result,
-              {
-                patientId,
-                deviceId,
-                toothOfInterest: tooth,
-                reportReading: finalReportReading,
-              }
-            );
-            setLastCompletedTestId(saved.id);
-            qc.invalidateQueries({ queryKey: ["tests"] });
-            toast.success("Test completed and saved to history");
-            playChime(1000, 0.3);
-          } catch (err) {
-            console.error("Failed to save test record:", err);
-            toast.error("Failed to save test record");
-          }
-        } else {
-          // If valid is false, do not save as test record
-          if (currentActiveTestId) {
-            await services.tests.discard(currentActiveTestId);
-          }
-          toast.error("No valid reading, check probe contact and retry");
-        }
-
-        setActiveTestId(null);
-        activeTestIdRef.current = null;
+        // Rule 8: Do not use the /result topic for report values. You may still use it to confirm the test ended.
+        console.log("Device result message received (confirming test ended):", result);
+        finalizeTestRef.current(result);
       },
       onCommandAck: (ack) => {
         console.log("Device command acknowledgement received:", ack);
@@ -214,7 +310,7 @@ function DashboardPage() {
         }
       },
     }),
-    [services, qc, patientId, deviceId, tooth]
+    []
   );
 
   const { latest, samples, clearSamples } = useLiveSensors(deviceId, true, streamOptions);
@@ -258,38 +354,70 @@ function DashboardPage() {
     }
   }, [running, latest?.testDuration, startedAt]);
 
-  // Rules 1, 2, 3: Capture the single report reading strictly after 20 seconds
-  // Ignore samples where testDuration < 20000.
-  // The report reading is the FIRST sample with testDuration >= 20000 where all of:
-  // deviceState == "TESTING", testSource == "web", fingerDetected == true, heartRate > 0, spo2 > 0.
-  // Lock it in; later samples do not overwrite it.
+  const currentDurationMs =
+    latest?.testDuration !== undefined && latest.testDuration > 0
+      ? latest.testDuration
+      : startedAt
+      ? Date.now() - startedAt
+      : 0;
+  const isWarmingUp = running && isWebTesting && currentDurationMs < 20000;
+  const warmupRemainingSec = Math.max(1, Math.ceil((20000 - currentDurationMs) / 1000));
+
+  // Rules 1, 2, 6, 7: Continuous calculation of report values from 20s onward
+  // - Warm-up: ignore samples with testDuration < 20000 for the report.
+  // - From 20s onward, on EVERY valid telemetry message (deviceState == "TESTING", testSource == "web",
+  //   fingerDetected == true, heartRate > 0, spo2 > 0), update report values.
+  // - Maintain running sums/counts of valid samples since 20s.
+  // - Skip invalid samples (zeros). Do not store them and do not reset averages.
+  // - Ignore telemetry with testSource == "button".
   useEffect(() => {
-    if (
-      running &&
-      !reportReadingRef.current &&
-      latest &&
-      latest.testDuration !== undefined &&
-      latest.testDuration >= 20000 &&
-      latest.deviceState === "TESTING" &&
-      latest.testSource === "web" &&
+    if (!running || !latest) return;
+    if (latest.testSource === "button") return;
+    if (latest.deviceState !== "TESTING" || latest.testSource !== "web") return;
+
+    const testDuration = latest.testDuration ?? 0;
+    // 1. Warm-up: ignore samples with testDuration < 20000 for the report
+    if (testDuration < 20000) return;
+
+    // 2. Validate sample: fingerDetected == true, heartRate > 0, spo2 > 0
+    const isValidSample =
       latest.fingerDetected === true &&
       (latest.heartRate ?? 0) > 0 &&
-      (latest.spo2 ?? 0) > 0
-    ) {
-      const reading: ReportReading = {
-        valid: true,
-        spo2: latest.spo2,
-        heartRate: latest.heartRate,
-        temperature: latest.temperature,
-        signalQuality: latest.signalQuality,
-        vitalityStatus: latest.vitalityStatus || "vital",
-        vitalityIndex: latest.vitalityIndex,
-        testDuration: latest.testDuration,
-        timestamp: latest.timestamp || new Date().toISOString(),
-      };
-      reportReadingRef.current = reading;
-      samplesRef.current = [latest];
-    }
+      (latest.spo2 ?? 0) > 0;
+
+    // Skip invalid samples (zeros). Do not store them and do not reset the averages.
+    if (!isValidSample) return;
+
+    // Deduplicate identical telemetry messages if triggered multiple times
+    const sampleKey = `${testDuration}-${latest.timestamp}-${latest.spo2}-${latest.heartRate}-${latest.temperature}`;
+    if (lastProcessedTelemetryRef.current === sampleKey) return;
+    lastProcessedTelemetryRef.current = sampleKey;
+
+    const prev = reportStatsRef.current;
+    const newCount = prev.count + 1;
+    const newSumSpo2 = prev.sumSpo2 + latest.spo2;
+    const newSumHeartRate = prev.sumHeartRate + latest.heartRate;
+    const newSumTemp = prev.sumTemperature + (latest.temperature ?? 0);
+    const newSumSig = prev.sumSignalQuality + (latest.signalQuality ?? 0);
+
+    const updated: RunningReportStats = {
+      count: newCount,
+      sumSpo2: newSumSpo2,
+      sumHeartRate: newSumHeartRate,
+      sumTemperature: newSumTemp,
+      sumSignalQuality: newSumSig,
+      currentSpo2: latest.spo2,
+      currentHeartRate: latest.heartRate,
+      currentTemperature: latest.temperature ?? 0,
+      currentSignalQuality: latest.signalQuality ?? 0,
+      vitalityStatus: latest.vitalityStatus || prev.vitalityStatus || "Vital",
+      vitalityIndex: latest.vitalityIndex ?? prev.vitalityIndex,
+      lastTestDuration: testDuration,
+    };
+
+    reportStatsRef.current = updated;
+    setLiveReportStats(updated);
+    samplesRef.current.push(latest);
   }, [running, latest]);
 
   // Beep sound for critical conditions — only when valid reading is present!
@@ -320,7 +448,12 @@ function DashboardPage() {
     onSuccess: (test) => {
       clearSamples();
       samplesRef.current = [];
-      reportReadingRef.current = null;
+      reportStatsRef.current = { ...initialReportStats };
+      setLiveReportStats({ ...initialReportStats });
+      setFinalReportReading(null);
+      setLatestResult(null);
+      setLastCompletedTestId(null);
+      lastProcessedTelemetryRef.current = null;
       setActiveTestId(test.id);
       activeTestIdRef.current = test.id;
       setRunning(true);
@@ -342,18 +475,14 @@ function DashboardPage() {
     finishingRef.current = true;
 
     try {
-      // Publish stop command to device via MQTT QoS 1
+      // Publish stop command to device via MQTT QoS 1: {"command":"stop_test","testId":"<id>"}
       await services.tests.stop(activeTestId);
 
-      // Start ~5 s timeout for device result message
+      // Rule 8: Do not use the /result topic for report values. You may still use it to confirm the test ended.
+      // Wait up to 5s for confirmation, then finalize directly with accumulated report averages.
       stopTimeoutRef.current = setTimeout(() => {
-        toast.error("Timeout waiting for test results from device");
-        setFinishing(false);
-        finishingRef.current = false;
-        setRunning(false);
-        runningRef.current = false;
-        setActiveTestId(null);
-        activeTestIdRef.current = null;
+        console.warn("Device confirmation timed out after 5s. Finalizing with accumulated report values.");
+        finalizeTest(null);
       }, 5000);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not stop test");
@@ -363,7 +492,7 @@ function DashboardPage() {
   };
 
   const reportMut = useMutation({
-    mutationFn: () => services.reports.generate(lastCompletedTestId!, undefined, reportReadingRef.current ?? undefined),
+    mutationFn: () => services.reports.generate(lastCompletedTestId!, undefined, finalReportReading ?? undefined),
     onSuccess: () => {
       toast.success("Report generated — view it in the Reports section.");
       qc.invalidateQueries({ queryKey: ["reports"] });
@@ -432,8 +561,140 @@ function DashboardPage() {
           </div>
         )}
 
+        {/* Banner: Warm-up period (< 20s) */}
+        {isWarmingUp && (
+          <div className="flex items-center justify-between rounded-xl border border-sky-500/30 bg-sky-500/10 p-3.5 text-sm text-sky-900 dark:text-sky-200 shadow-sm animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-600 dark:text-sky-400">
+                <Clock className="h-4 w-4 animate-spin" />
+              </div>
+              <div>
+                <span className="font-semibold">Stabilising... {warmupRemainingSec}s</span>
+                <span className="hidden sm:inline"> — Ignore early probe positioning. Continuous report averaging will begin at 20 seconds.</span>
+              </div>
+            </div>
+            <span className="text-xs font-mono font-medium rounded bg-sky-500/20 px-2.5 py-1">
+              Warm-up {Math.floor(currentDurationMs / 1000)}s / 20s
+            </span>
+          </div>
+        )}
+
         <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
           <div className="flex flex-col gap-3">
+            {/* Live Continuous Assessment & Report Calculation Card */}
+            {running && isWebTesting && (
+              <GlassCard className="border-brand/30 bg-card/75 shadow-sm overflow-hidden p-3.5 sm:p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border/50">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                        isWarmingUp
+                          ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                          : "bg-teal/15 text-teal"
+                      }`}
+                    >
+                      {isWarmingUp ? (
+                        <Clock className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Activity className="h-4 w-4 animate-pulse" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-sm">
+                        {isWarmingUp ? `Stabilising... ${warmupRemainingSec}s` : "Continuous Report Calculation (Post-20s)"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {isWarmingUp
+                          ? "Warm-up phase in progress. Live report averages will start accumulating at 20s until you click Stop."
+                          : `Continuously updating report averages on every valid message · ${liveReportStats.count} valid sample${
+                              liveReportStats.count === 1 ? "" : "s"
+                            } recorded`}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isWarmingUp ? (
+                      <span className="rounded-md bg-sky-500/20 px-2.5 py-1 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                        Stabilising... {warmupRemainingSec}s
+                      </span>
+                    ) : liveReportStats.count < 5 ? (
+                      <span className="rounded-md bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                        Collecting ({liveReportStats.count}/5 min required)
+                      </span>
+                    ) : (
+                      <span className="rounded-md bg-teal/20 px-2.5 py-1 text-xs font-semibold text-teal">
+                        Ready ({liveReportStats.count} samples · safe to stop)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {!isWarmingUp && (
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-2.5">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>SpO₂</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">CURRENT / AVG</span>
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="font-display text-lg font-bold text-foreground">
+                          {liveReportStats.currentSpo2 > 0 ? `${liveReportStats.currentSpo2.toFixed(1)}%` : "--"}
+                        </span>
+                        <span className="text-xs text-brand font-semibold">
+                          avg {liveReportStats.count > 0 ? `${(liveReportStats.sumSpo2 / liveReportStats.count).toFixed(1)}%` : "--"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-2.5">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Pulse</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">CURRENT / AVG</span>
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="font-display text-lg font-bold text-foreground">
+                          {liveReportStats.currentHeartRate > 0 ? `${Math.round(liveReportStats.currentHeartRate)}` : "--"}
+                        </span>
+                        <span className="text-xs text-teal font-semibold">
+                          avg {liveReportStats.count > 0 ? `${Math.round(liveReportStats.sumHeartRate / liveReportStats.count)} bpm` : "--"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-2.5">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Temperature</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">CURRENT / AVG</span>
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="font-display text-lg font-bold text-foreground">
+                          {liveReportStats.currentTemperature > 0 ? `${liveReportStats.currentTemperature.toFixed(1)}°C` : "--"}
+                        </span>
+                        <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
+                          avg {liveReportStats.count > 0 ? `${(liveReportStats.sumTemperature / liveReportStats.count).toFixed(2)}°C` : "--"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-2.5">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Signal Quality</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">CURRENT / AVG</span>
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="font-display text-lg font-bold text-foreground">
+                          {liveReportStats.currentSignalQuality > 0 ? `${Math.round(liveReportStats.currentSignalQuality)}%` : "--"}
+                        </span>
+                        <span className="text-xs text-rose-500 font-semibold">
+                          avg {liveReportStats.count > 0 ? `${Math.round(liveReportStats.sumSignalQuality / liveReportStats.count)}%` : "--"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </GlassCard>
+            )}
+
             <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               <SensorCard
                 label="SpO₂"
@@ -571,7 +832,7 @@ function DashboardPage() {
               }}
               onStop={handleStop}
               onGenerateReport={() => reportMut.mutate()}
-              canGenerate={!!lastCompletedTestId && !running && !finishing}
+              canGenerate={!!lastCompletedTestId && !running && !finishing && (finalReportReading?.valid ?? false)}
             />
           </aside>
         </div>
@@ -582,6 +843,7 @@ function DashboardPage() {
         open={showResultDialog}
         onOpenChange={setShowResultDialog}
         result={latestResult}
+        reportReading={finalReportReading}
         patientName={activePatient?.fullName}
         tooth={tooth}
         onGenerateReport={() => reportMut.mutate()}
