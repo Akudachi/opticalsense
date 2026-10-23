@@ -89,12 +89,38 @@ export async function generateReportPdf({ test, patient, clinic, report }: Args)
     startY: y,
     theme: "plain",
     styles: { fontSize: 10, cellPadding: 4 },
-    head: [["Assessment Parameter", "Value"]],
+    head: [["Assessment Parameter (Continuous Summary)", "Value"]],
     headStyles: { fillColor: [239, 244, 253], textColor: 30, fontStyle: "bold" },
     body: readingRows,
   });
 
-  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 22;
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 14;
+
+  // 20-second interval breakdown table (if multiple intervals recorded)
+  const intervals = reading?.intervalReadings;
+  if (isValid && intervals && intervals.length > 0) {
+    const intervalRows = intervals.map((inv) => [
+      inv.timeWindowLabel,
+      inv.spo2 > 0 ? `${inv.spo2}%` : "Stabilising",
+      inv.heartRate > 0 ? `${inv.heartRate} bpm` : "--",
+      inv.temperature > 0 ? `${inv.temperature.toFixed(2)} °C` : "--",
+      inv.signalQuality > 0 ? `${inv.signalQuality}%` : "--",
+      inv.vitalityStatus,
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      theme: "plain",
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      head: [["20s Interval", "SpO₂", "Pulse", "Temp", "Signal", "Status"]],
+      headStyles: { fillColor: [239, 244, 253], textColor: 30, fontStyle: "bold" },
+      body: intervalRows,
+    });
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 16;
+  } else {
+    y += 4;
+  }
 
   // Verdict block
   if (isValid && reading) {

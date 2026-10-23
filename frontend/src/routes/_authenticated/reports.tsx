@@ -235,6 +235,7 @@ function ReportsPage() {
                           <span className="text-muted-foreground">Post-20s Averages:</span>
                           <span className="font-mono font-medium text-foreground">
                             {reading.validReadings ? `${reading.validReadings} valid samples` : `${(reading.testDuration / 1000).toFixed(1)}s`}
+                            {reading.intervalReadings && reading.intervalReadings.length > 0 && ` (${reading.intervalReadings.length}× 20s intervals)`}
                           </span>
                         </div>
 

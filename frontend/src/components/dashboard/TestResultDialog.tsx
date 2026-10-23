@@ -184,6 +184,40 @@ export function TestResultDialog({
                 <div className="mt-0.5 text-[10px] text-muted-foreground">Samples since 20s</div>
               </div>
             </div>
+
+            {/* 20-Second Interval Readings List */}
+            {reading?.intervalReadings && reading.intervalReadings.length > 0 && (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                  <span>20-Second Interval Readings</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    {reading.intervalReadings.length} interval{reading.intervalReadings.length === 1 ? "" : "s"} logged (stored in Excel)
+                  </span>
+                </div>
+                <div className="max-h-36 overflow-y-auto space-y-1.5 text-xs pr-1">
+                  {reading.intervalReadings.map((inv) => (
+                    <div
+                      key={inv.intervalIndex}
+                      className="flex items-center justify-between rounded-lg bg-card/60 px-2.5 py-1.5 border border-border/40 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-medium text-[11px] text-muted-foreground">
+                          {inv.timeWindowLabel}
+                        </span>
+                        <span className="font-semibold text-foreground">
+                          {inv.spo2 > 0 ? `${inv.spo2}% SpO₂` : "Stabilising"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2.5 text-muted-foreground font-mono text-[11px]">
+                        <span>{inv.heartRate > 0 ? `${inv.heartRate} bpm` : "--"}</span>
+                        <span>{inv.temperature > 0 ? `${inv.temperature}°C` : "--"}</span>
+                        <span className="text-teal font-medium">{inv.vitalityStatus}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-3.5 py-2">

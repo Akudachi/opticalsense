@@ -29,6 +29,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { calcAge } from "@/utils/format";
+import { getOrComputeIntervals } from "@/utils/excel";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -201,6 +202,18 @@ function DashboardPage() {
       const avgTemp = stats.sumTemperature / stats.count;
       const avgSignalQuality = Math.round(stats.sumSignalQuality / stats.count);
 
+      const intervals = getOrComputeIntervals({
+        samples: samplesRef.current,
+        startedAt: startedAt ? new Date(startedAt).toISOString() : new Date().toISOString(),
+        summary: {
+          avgSpO2: avgSpo2,
+          avgPulse: avgPulse,
+          avgTemp: avgTemp,
+          durationSec: Math.round(currentDurationMs / 1000),
+          validReadings: stats.count,
+        },
+      });
+
       const reportReading: ReportReading = {
         valid: true,
         spo2: Number(avgSpo2.toFixed(1)),
@@ -216,6 +229,7 @@ function DashboardPage() {
         currentHeartRate: stats.currentHeartRate,
         currentTemperature: stats.currentTemperature,
         currentSignalQuality: stats.currentSignalQuality,
+        intervalReadings: intervals,
       };
 
       const recordPayload: DeviceResultPayload = {
@@ -375,8 +389,27 @@ function DashboardPage() {
     if (latest.testSource === "button") return;
     if (latest.deviceState !== "TESTING" || latest.testSource !== "web") return;
 
-    const testDuration = latest.testDuration ?? 0;
-    // 1. Warm-up: ignore samples with testDuration < 20000 for the report
+    const testDuration =
+      latest.testDuration !== undefined && latest.testDuration > 0
+        ? latest.testDuration
+        : startedAt
+        ? Date.now() - startedAt
+        : 0;
+
+    // Deduplicate identical telemetry messages if triggered multiple times
+    const sampleKey = `${testDuration}-${latest.timestamp}-${latest.spo2}-${latest.heartRate}-${latest.temperature}`;
+    if (lastProcessedTelemetryRef.current === sampleKey) return;
+    lastProcessedTelemetryRef.current = sampleKey;
+
+    // Record every telemetry sample for the full continuous test log & 20s interval slices
+    const sampleRecord: SensorSample = {
+      ...latest,
+      testDuration,
+      timestamp: latest.timestamp || new Date().toISOString(),
+    };
+    samplesRef.current.push(sampleRecord);
+
+    // 1. Warm-up: ignore samples with testDuration < 20000 for the running report averages
     if (testDuration < 20000) return;
 
     // 2. Validate sample: fingerDetected == true, heartRate > 0, spo2 > 0
@@ -387,11 +420,6 @@ function DashboardPage() {
 
     // Skip invalid samples (zeros). Do not store them and do not reset the averages.
     if (!isValidSample) return;
-
-    // Deduplicate identical telemetry messages if triggered multiple times
-    const sampleKey = `${testDuration}-${latest.timestamp}-${latest.spo2}-${latest.heartRate}-${latest.temperature}`;
-    if (lastProcessedTelemetryRef.current === sampleKey) return;
-    lastProcessedTelemetryRef.current = sampleKey;
 
     const prev = reportStatsRef.current;
     const newCount = prev.count + 1;
@@ -417,8 +445,7 @@ function DashboardPage() {
 
     reportStatsRef.current = updated;
     setLiveReportStats(updated);
-    samplesRef.current.push(latest);
-  }, [running, latest]);
+  }, [running, latest, startedAt]);
 
   // Beep sound for critical conditions — only when valid reading is present!
   useEffect(() => {

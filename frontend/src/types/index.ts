@@ -149,6 +149,20 @@ export type RunningReportStats = {
   lastTestDuration: number;
 };
 
+export type IntervalReading = {
+  intervalIndex: number; // 1, 2, 3...
+  timeMarkSec: number; // 20, 40, 60, 80...
+  timeWindowLabel: string; // "0s - 20s", "20s - 40s", "40s - 60s"...
+  timestamp: string;
+  heartRate: number;
+  spo2: number;
+  temperature: number;
+  signalQuality: number;
+  vitalityStatus: string;
+  vitalityIndex?: number;
+  validReadingsCount: number;
+};
+
 export type ReportReading = {
   valid: boolean;
   spo2: number; // running average since 20s
@@ -164,6 +178,7 @@ export type ReportReading = {
   currentHeartRate?: number;
   currentTemperature?: number;
   currentSignalQuality?: number;
+  intervalReadings?: IntervalReading[]; // 20-second interval readings
   errorMessage?: string;
 };
 
