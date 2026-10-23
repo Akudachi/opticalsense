@@ -264,7 +264,16 @@ function DashboardPage() {
         setFinalReportReading(reportReading);
         setShowResultDialog(true);
         qc.invalidateQueries({ queryKey: ["tests"] });
-        toast.success("Test completed and saved to history");
+
+        // Auto-generate report so it is immediately accessible in the Reports section
+        try {
+          await services.reports.generate(saved.id, undefined, reportReading);
+          qc.invalidateQueries({ queryKey: ["reports"] });
+        } catch (reportErr) {
+          console.warn("Auto report generation notice:", reportErr);
+        }
+
+        toast.success("Test completed and report generated");
         playChime(1000, 0.3);
       } catch (err) {
         console.error("Failed to save test record:", err);

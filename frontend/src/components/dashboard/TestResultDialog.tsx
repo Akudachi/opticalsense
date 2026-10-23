@@ -60,6 +60,7 @@ export function TestResultDialog({
   const vitalityStatus = reportReading?.valid ? reportReading.vitalityStatus : (result?.vitalityStatus || "Inconclusive");
   const vitalityIndex = reportReading?.vitalityIndex ?? result?.vitalityIndex;
   const validReadings = reportReading?.validReadings ?? result?.validReadings ?? 0;
+  const intervals = reportReading?.intervalReadings;
 
   const statusLower = (vitalityStatus || "").toLowerCase();
   const isVital = statusLower.includes("vital") && !statusLower.includes("non");
@@ -186,16 +187,16 @@ export function TestResultDialog({
             </div>
 
             {/* 20-Second Interval Readings List */}
-            {reading?.intervalReadings && reading.intervalReadings.length > 0 && (
+            {intervals && intervals.length > 0 && (
               <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
                 <div className="flex items-center justify-between text-xs font-semibold mb-2">
                   <span>20-Second Interval Readings</span>
                   <span className="text-[10px] text-muted-foreground font-normal">
-                    {reading.intervalReadings.length} interval{reading.intervalReadings.length === 1 ? "" : "s"} logged (stored in Excel)
+                    {intervals.length} interval{intervals.length === 1 ? "" : "s"} logged (stored in Excel)
                   </span>
                 </div>
                 <div className="max-h-36 overflow-y-auto space-y-1.5 text-xs pr-1">
-                  {reading.intervalReadings.map((inv) => (
+                  {intervals.map((inv) => (
                     <div
                       key={inv.intervalIndex}
                       className="flex items-center justify-between rounded-lg bg-card/60 px-2.5 py-1.5 border border-border/40 text-xs"

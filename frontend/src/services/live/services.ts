@@ -716,8 +716,9 @@ export const liveReports: IReportService = {
     }
 
     const reports = getStoredReports();
+    const existingIndex = reports.findIndex(r => r.testId === testId);
     const newReport: Report = {
-      id: `report-${Date.now()}`,
+      id: existingIndex >= 0 ? reports[existingIndex].id : `report-${Date.now()}`,
       testId,
       patientId: test.patientId,
       clinicId: test.clinicId,
@@ -727,7 +728,11 @@ export const liveReports: IReportService = {
       valid: reportReading.valid,
       errorMessage: reportReading.errorMessage,
     };
-    reports.push(newReport);
+    if (existingIndex >= 0) {
+      reports[existingIndex] = newReport;
+    } else {
+      reports.push(newReport);
+    }
     storeReports(reports);
     
     addActivityEvent('report_generated', `Report generated for test ${testId}`, newReport.id);

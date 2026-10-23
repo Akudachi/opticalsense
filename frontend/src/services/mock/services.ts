@@ -393,8 +393,9 @@ export const mockReports: IReportService = {
       }
     }
 
+    const existingIndex = mockDb.reports.findIndex(r => r.testId === testId);
     const report: Report = {
-      id: uid("rep"),
+      id: existingIndex >= 0 ? mockDb.reports[existingIndex].id : uid("rep"),
       testId,
       patientId: test.patientId,
       clinicId: SEED.CLINIC_ID,
@@ -404,7 +405,11 @@ export const mockReports: IReportService = {
       valid: reportReading.valid,
       errorMessage: reportReading.errorMessage,
     };
-    mockDb.reports.unshift(report);
+    if (existingIndex >= 0) {
+      mockDb.reports[existingIndex] = report;
+    } else {
+      mockDb.reports.unshift(report);
+    }
     mockDb.activity.unshift({
       id: uid("act"),
       at: report.generatedAt,

@@ -46,14 +46,16 @@ export function getOrComputeIntervals(
     return [];
   }
 
+  const maxSampleDuration = samples.reduce((m, s) => Math.max(m, s.testDuration ?? 0), 0);
   const durationMs = Math.max(
     reading?.testDuration ?? 0,
     test.summary?.durationSec ? test.summary.durationSec * 1000 : 0,
-    ...samples.map((s) => s.testDuration ?? 0)
+    maxSampleDuration
   );
 
   const numIntervals = Math.max(1, Math.ceil(durationMs / 20000));
   const intervals: IntervalReading[] = [];
+  const defaultTimestamp = test.startedAt ? formatDateTime(test.startedAt) : new Date().toISOString();
 
   for (let i = 0; i < numIntervals; i++) {
     const startMs = i * 20000;
@@ -81,7 +83,7 @@ export function getOrComputeIntervals(
         intervalIndex: i + 1,
         timeMarkSec: markSec,
         timeWindowLabel: windowLabel,
-        timestamp: lastSample.timestamp || formatDateTime(test.startedAt),
+        timestamp: lastSample.timestamp || defaultTimestamp,
         spo2: Number(avgSpo2.toFixed(1)),
         heartRate: Math.round(avgHr),
         temperature: Number(avgTemp.toFixed(2)),
@@ -96,7 +98,7 @@ export function getOrComputeIntervals(
         intervalIndex: i + 1,
         timeMarkSec: markSec,
         timeWindowLabel: windowLabel,
-        timestamp: lastSample.timestamp || formatDateTime(test.startedAt),
+        timestamp: lastSample.timestamp || defaultTimestamp,
         spo2: 0,
         heartRate: 0,
         temperature: Number((lastSample.temperature ?? 0).toFixed(2)),
