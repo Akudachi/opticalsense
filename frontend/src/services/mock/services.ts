@@ -8,6 +8,7 @@ import type {
   IReportService,
   ISensorStream,
   ITestService,
+  StreamOptions,
 } from "@/services/interfaces";
 import type {
   ActivityEvent,
@@ -16,6 +17,7 @@ import type {
   Paged,
   Patient,
   Report,
+  ReportReading,
   SensorSample,
   SystemStatus,
   Test,
@@ -128,13 +130,13 @@ function summarize(samples: SensorSample[], durationSec: number) {
   }
   const avg = (fn: (s: SensorSample) => number) => samples.reduce((s, x) => s + fn(x), 0) / samples.length;
   const avgSpO2 = +avg((s) => s.spo2).toFixed(1);
-  const avgPulse = Math.round(avg((s) => s.pulse));
+  const avgPulse = Math.round(avg((s) => s.heartRate ?? s.pulse ?? 70));
   const avgTemp = +avg((s) => s.temperature).toFixed(2);
   const signalQuality = Math.round(avg((s) => s.signalQuality));
   return {
     avgSpO2, avgPulse, avgTemp,
     minSpO2: +Math.min(...samples.map((s) => s.spo2)).toFixed(1),
-    maxPulse: Math.round(Math.max(...samples.map((s) => s.pulse))),
+    maxPulse: Math.round(Math.max(...samples.map((s) => s.heartRate ?? s.pulse ?? 70))),
     signalQuality,
     confidence: (signalQuality > 82 ? "high" : signalQuality > 68 ? "medium" : "low") as "low" | "medium" | "high",
     durationSec,
@@ -189,9 +191,10 @@ export const mockTests: ITestService = {
     mockDb.saveActivity();
     return test;
   },
-  async stop(id, { samples, observations }) {
+  async stop(id, payload) {
     mockDb.init();
     await delay(160);
+    const { samples = [], observations } = payload || {};
     const i = mockDb.tests.findIndex((t) => t.id === id);
     if (i < 0) throw new Error("Test not found");
     const endedAt = new Date().toISOString();
@@ -216,6 +219,95 @@ export const mockTests: ITestService = {
     });
     mockDb.saveActivity();
     return mockDb.tests[i];
+  },
+  async saveResult(id, result, metadata) {
+    mockDb.init();
+    await delay(120);
+    const avgSpO2 = result.finalSpo2 ?? result.spo2 ?? 0;
+    const avgPulse = result.finalHeartRate ?? result.heartRate ?? 0;
+    const avgTemp = result.finalTemperature ?? result.temperature ?? 0;
+    const durationSec = result.durationMs ? Math.round(result.durationMs / 1000) : 0;
+    const endedAt = new Date().toISOString();
+
+    let verdict: Test['pulpVerdict'] = 'inconclusive';
+    const sLower = (result.vitalityStatus || '').toLowerCase();
+    if (sLower.includes('non')) verdict = 'non_vital';
+    else if (sLower.includes('vital')) verdict = 'vital';
+
+    const summary = {
+      avgSpO2,
+      avgPulse,
+      avgTemp,
+      minSpO2: avgSpO2,
+      maxPulse: avgPulse,
+      signalQuality: result.signalQuality ?? 0,
+      confidence: (result.signalQuality ?? 0) > 75 ? 'high' as const : 'medium' as const,
+      durationSec,
+      vitalityIndex: result.vitalityIndex,
+      vitalityStatus: result.vitalityStatus,
+      valid: result.valid,
+      validReadings: result.validReadings,
+    };
+
+    const post20sSamples: SensorSample[] = metadata?.reportReading?.valid
+      ? [
+          {
+            deviceId: result.deviceId || metadata?.deviceId || "device-1",
+            timestamp: metadata.reportReading.timestamp,
+            battery: 100,
+            temperature: metadata.reportReading.temperature,
+            heartRate: metadata.reportReading.heartRate,
+            spo2: metadata.reportReading.spo2,
+            signalQuality: metadata.reportReading.signalQuality,
+            vitalityStatus: metadata.reportReading.vitalityStatus,
+            vitalityIndex: metadata.reportReading.vitalityIndex,
+            testDuration: metadata.reportReading.testDuration,
+          },
+        ]
+      : [];
+
+    const i = mockDb.tests.findIndex((t) => t.id === id);
+    if (i >= 0) {
+      mockDb.tests[i] = {
+        ...mockDb.tests[i],
+        status: "completed",
+        endedAt,
+        summary,
+        pulpVerdict: verdict,
+        valid: result.valid,
+        reportReading: metadata?.reportReading,
+        samples: post20sSamples,
+      };
+      mockDb.saveTests();
+      return mockDb.tests[i];
+    }
+
+    const newTest: Test = {
+      id,
+      clinicId: SEED.CLINIC_ID,
+      patientId: metadata?.patientId || "patient-1",
+      deviceId: result.deviceId || metadata?.deviceId || "device-1",
+      doctorId: SEED.DOCTOR_ID,
+      startedAt: new Date(Date.now() - (result.durationMs || 10000)).toISOString(),
+      endedAt,
+      status: "completed",
+      toothOfInterest: metadata?.toothOfInterest,
+      samples: post20sSamples,
+      summary,
+      observations: metadata?.observations || "",
+      pulpVerdict: verdict,
+      valid: result.valid,
+      reportReading: metadata?.reportReading,
+    };
+    mockDb.tests.unshift(newTest);
+    mockDb.saveTests();
+    return newTest;
+  },
+  async discard(id) {
+    mockDb.init();
+    await delay(50);
+    mockDb.tests = mockDb.tests.filter((t) => t.id !== id);
+    mockDb.saveTests();
   },
   async update(id, input) {
     mockDb.init();
@@ -246,13 +338,51 @@ export const mockReports: IReportService = {
     await delay(80);
     return mockDb.reports.find((r) => r.id === id) ?? null;
   },
-  async generate(testId, aiAnalysis) {
+  async generate(testId, aiAnalysis, reading) {
     mockDb.init();
     await delay(180);
     const test = mockDb.tests.find((t) => t.id === testId);
     if (!test) throw new Error("Test not found");
     const existing = mockDb.reports.find((r) => r.testId === testId);
-    if (existing) return existing;
+    if (existing && !reading) return existing;
+
+    // Pick the report reading taken after first 20s (never use /result average)
+    let reportReading: ReportReading;
+    if (reading) {
+      reportReading = reading;
+    } else if (test.reportReading) {
+      reportReading = test.reportReading;
+    } else {
+      const validSample = test.samples.find(
+        (s) => (s.testDuration ?? 0) >= 20000 && (s.heartRate ?? 0) > 0 && (s.spo2 ?? 0) > 0
+      );
+      if (validSample) {
+        reportReading = {
+          valid: true,
+          spo2: validSample.spo2,
+          heartRate: validSample.heartRate,
+          temperature: validSample.temperature,
+          signalQuality: validSample.signalQuality,
+          vitalityStatus: validSample.vitalityStatus || (test.pulpVerdict === "non_vital" ? "Non-Vital" : "Vital"),
+          vitalityIndex: validSample.vitalityIndex,
+          testDuration: validSample.testDuration ?? 20000,
+          timestamp: validSample.timestamp,
+        };
+      } else {
+        reportReading = {
+          valid: false,
+          spo2: 0,
+          heartRate: 0,
+          temperature: 0,
+          signalQuality: 0,
+          vitalityStatus: "Inconclusive",
+          testDuration: 0,
+          timestamp: new Date().toISOString(),
+          errorMessage: "No valid reading after 20 s. Retry and keep the probe steady.",
+        };
+      }
+    }
+
     const report: Report = {
       id: uid("rep"),
       testId,
@@ -260,6 +390,9 @@ export const mockReports: IReportService = {
       clinicId: SEED.CLINIC_ID,
       generatedAt: new Date().toISOString(),
       aiAnalysis,
+      reading: reportReading,
+      valid: reportReading.valid,
+      errorMessage: reportReading.errorMessage,
     };
     mockDb.reports.unshift(report);
     mockDb.activity.unshift({
@@ -270,7 +403,15 @@ export const mockReports: IReportService = {
       refId: report.id,
     });
     mockDb.saveActivity();
+    mockDb.saveReports();
     return report;
+  },
+  async remove(id) {
+    mockDb.init();
+    await delay(120);
+    mockDb.reports = mockDb.reports.filter((r) => r.id !== id);
+    mockDb.saveReports();
+    return true;
   },
 };
 
@@ -308,7 +449,7 @@ export const mockDevices: IDeviceService = {
     mockDb.saveDevices();
     mockDb.activity.unshift({
       id: uid("act"),
-      at: dev.pairedAt,
+      at: dev.pairedAt || new Date().toISOString(),
       kind: "device_paired",
       message: `Device ${dev.deviceId} paired successfully`,
       refId: dev.id,
@@ -328,7 +469,18 @@ export const mockDevices: IDeviceService = {
     const d = mockDb.devices.find((x) => x.id === id);
     if (!d) throw new Error("Device not found");
     d.lastSeen = new Date().toISOString();
-    d.signalStrength = Math.min(100, d.signalStrength + Math.floor(Math.random() * 5));
+    d.signalStrength = Math.min(100, (d.signalStrength ?? 80) + Math.floor(Math.random() * 5));
+    mockDb.saveDevices();
+    return d;
+  },
+  async repair(id) {
+    mockDb.init();
+    await delay(200);
+    const d = mockDb.devices.find((x) => x.id === id);
+    if (!d) throw new Error("Device not found");
+    d.online = true;
+    d.status = "online";
+    d.lastSeen = new Date().toISOString();
     mockDb.saveDevices();
     return d;
   },
@@ -369,6 +521,9 @@ export const mockActivity: IActivityService = {
 // ── Sensor stream (simulated PPG) ───────────────────────────────────────────
 class MockSensorStream implements ISensorStream {
   private status: SystemStatus = {
+    connected: true,
+    devicesOnline: 1,
+    lastUpdate: new Date().toISOString(),
     backend: "connected",
     mqtt: "connected",
     database: "connected",
@@ -377,7 +532,7 @@ class MockSensorStream implements ISensorStream {
   private statusCbs = new Set<(s: SystemStatus) => void>();
   private subs = new Map<string, { cb: (s: SensorSample) => void; started: number; timer: ReturnType<typeof setInterval> }>();
 
-  subscribe(deviceId: string, onSample: (s: SensorSample) => void) {
+  subscribe(deviceId: string, onSample: (s: SensorSample) => void, options?: StreamOptions) {
     const started = performance.now();
     let i = 0;
     let hrTarget = 74;
@@ -399,15 +554,21 @@ class MockSensorStream implements ISensorStream {
       const temperature = +(36.6 + Math.sin(i / 200) * 0.15 + (Math.random() - 0.5) * 0.04).toFixed(2);
       const signalQuality = Math.max(60, Math.min(98, Math.round(88 + Math.sin(i / 25) * 6 + (Math.random() - 0.5) * 3)));
       const sample: SensorSample = {
+        deviceId,
+        timestamp: new Date().toISOString(),
         t,
         red,
         ir,
         spo2: +spo2.toFixed(1),
         pulse,
+        heartRate: pulse,
         temperature,
-        batteryPct: Math.max(15, 90 - Math.floor(i / 800)),
+        battery: Math.max(15, 90 - Math.floor(i / 800)),
         signalQuality,
         confidence: signalQuality > 82 ? "high" : signalQuality > 68 ? "medium" : "low",
+        deviceState: "TESTING",
+        testSource: "web",
+        testDuration: Math.round(t),
       };
       onSample(sample);
     }, 100);

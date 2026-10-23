@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   AUTH: "opticalsense.auth.v1",
   PATIENTS: "opticalsense.patients.v1",
   TESTS: "opticalsense.tests.v1",
+  REPORTS: "opticalsense.reports.v1",
   DEVICES: "opticalsense.devices.v1",
   CLINIC: "opticalsense.clinic.v1",
   ACTIVITY: "opticalsense.activity.v1",

@@ -1,12 +1,13 @@
 import { GlassCard } from "@/components/common/GlassCard";
 import { timeAgo } from "@/utils/format";
 import type { ActivityEvent } from "@/types";
-import { Activity, FilePlus, Play, Radio, Square, UserPlus, WifiOff } from "lucide-react";
+import { Activity, FilePlus, Play, Radio, Square, Trash2, UserPlus, WifiOff } from "lucide-react";
 
 const ICON = {
   test_started: Play,
   test_stopped: Square,
   report_generated: FilePlus,
+  report_deleted: Trash2,
   patient_added: UserPlus,
   device_paired: Radio,
   device_online: Activity,

@@ -15,6 +15,7 @@ type Props = {
   samples?: SensorSample[];
   metricKey?: keyof SensorSample;
   hint?: string;
+  isValid?: boolean;
 };
 
 const TINT: Record<Props["tint"], { bg: string; fg: string; stroke: string }> = {
@@ -29,9 +30,11 @@ const STATUS_COLORS = {
   critical: { bg: "bg-red-500/10", fg: "text-red-600 dark:text-red-400", stroke: "oklch(0.55 0.2 25)" },
   normal: { bg: "bg-yellow-500/10", fg: "text-yellow-600 dark:text-yellow-400", stroke: "oklch(0.75 0.15 85)" },
   healthy: { bg: "bg-green-500/10", fg: "text-green-600 dark:text-green-400", stroke: "oklch(0.65 0.2 145)" },
+  idle: { bg: "bg-muted/40", fg: "text-muted-foreground", stroke: "oklch(0.6 0.02 240)" },
 };
 
-function getHealthStatus(label: string, value: number): "critical" | "normal" | "healthy" {
+function getHealthStatus(label: string, value: number): "critical" | "normal" | "healthy" | "idle" {
+  if (value <= 0) return "idle";
   switch (label) {
     case "SpO₂":
       if (value < 90) return "critical";
@@ -58,18 +61,19 @@ function getHealthStatus(label: string, value: number): "critical" | "normal" | 
   }
 }
 
-export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tint, samples, metricKey, hint }: Props) {
-  const t = TINT[tint];
-  const status = getHealthStatus(label, value);
+export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tint, samples, metricKey, hint, isValid }: Props) {
+  const hasReading = isValid !== undefined ? isValid : (value > 0);
+  const status = getHealthStatus(label, hasReading ? value : 0);
   const statusColors = STATUS_COLORS[status];
   
+  // Filter out real zeros from sparkline: 0 means no reading
   const data =
     samples && metricKey
-      ? samples.slice(-40).map((s, i) => ({ i, v: Number(s[metricKey]) }))
+      ? samples
+          .slice(-40)
+          .filter(s => Number(s[metricKey]) > 0)
+          .map((s, i) => ({ i, v: Number(s[metricKey]) }))
       : [];
-  
-  // Get latest sample for additional info
-  const latestSample = samples?.[samples.length - 1];
   
   return (
     <GlassCard interactive className="p-3.5 sm:p-5">
@@ -77,7 +81,11 @@ export function SensorCard({ label, value, decimals = 0, suffix, icon: Icon, tin
         <div className="min-w-0 flex-1">
           <div className="text-xs text-muted-foreground truncate">{label}</div>
           <div className="mt-1 font-display text-2xl sm:text-3xl font-semibold tracking-tight truncate">
-            <CountUp value={value} decimals={decimals} suffix={suffix} className={statusColors.fg} />
+            {hasReading ? (
+              <CountUp value={value} decimals={decimals} suffix={suffix} className={statusColors.fg} />
+            ) : (
+              <span className="text-muted-foreground/60 font-mono tracking-wider font-semibold">--</span>
+            )}
           </div>
           {hint && <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">{hint}</div>}
         </div>

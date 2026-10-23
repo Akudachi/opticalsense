@@ -94,15 +94,19 @@ function synthesizeSamples(seed: number, durationSec: number, hr: number, spo2Ba
     const temperature = 36.6 + Math.sin(i / 200) * 0.15 + (rand() - 0.5) * 0.05;
     const signalQuality = Math.max(55, Math.min(98, 88 + Math.sin(i / 25) * 6 + (rand() - 0.5) * 4));
     out.push({
+      deviceId: "dev_op_a1",
+      timestamp: new Date(Date.now() - (total - i) * 100).toISOString(),
+      battery: Math.max(20, 90 - Math.floor(i / (hz * 60))),
+      heartRate: +pulse.toFixed(0),
       t,
       red,
       ir,
       spo2: +spo2.toFixed(1),
       pulse: +pulse.toFixed(0),
       temperature: +temperature.toFixed(2),
-      batteryPct: Math.max(20, 90 - Math.floor(i / (hz * 60))),
       signalQuality: +signalQuality.toFixed(0),
       confidence: signalQuality > 82 ? "high" : signalQuality > 68 ? "medium" : "low",
+      testDuration: Math.round(t),
     });
   }
   return out;
@@ -129,10 +133,10 @@ export function buildSeedTests(patients: Patient[]): Test[] {
       const endedAt = new Date(new Date(startedAt).getTime() + durationSec * 1000).toISOString();
       const samples = synthesizeSamples(pi * 1000 + k * 37 + 1, durationSec, hr, spo2Base);
       const avgSpO2 = +(samples.reduce((s, x) => s + x.spo2, 0) / samples.length).toFixed(1);
-      const avgPulse = Math.round(samples.reduce((s, x) => s + x.pulse, 0) / samples.length);
+      const avgPulse = Math.round(samples.reduce((s, x) => s + (x.pulse ?? x.heartRate ?? 70), 0) / samples.length);
       const avgTemp = +(samples.reduce((s, x) => s + x.temperature, 0) / samples.length).toFixed(2);
       const minSpO2 = +Math.min(...samples.map((s) => s.spo2)).toFixed(1);
-      const maxPulse = Math.round(Math.max(...samples.map((s) => s.pulse)));
+      const maxPulse = Math.round(Math.max(...samples.map((s) => s.pulse ?? s.heartRate ?? 70)));
       const signalQuality = Math.round(samples.reduce((s, x) => s + x.signalQuality, 0) / samples.length);
       const verdictIdx = (pi + k) % verdicts.length;
       tests.push({

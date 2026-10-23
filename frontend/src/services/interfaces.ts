@@ -6,9 +6,11 @@ import type {
   ActivityEvent,
   Clinic,
   Device,
+  DeviceResultPayload,
   Paged,
   Patient,
   Report,
+  ReportReading,
   SensorSample,
   SystemStatus,
   Test,
@@ -34,15 +36,28 @@ export interface ITestService {
   list(params?: { patientId?: string; page?: number; pageSize?: number }): Promise<Paged<Test>>;
   get(id: string): Promise<Test | null>;
   start(input: { patientId: string; deviceId: string; toothOfInterest?: string }): Promise<Test>;
-  stop(id: string, payload: { samples: SensorSample[]; observations?: string }): Promise<Test>;
+  stop(id: string, payload?: { samples?: SensorSample[]; observations?: string; result?: DeviceResultPayload }): Promise<Test>;
+  saveResult(
+    testId: string,
+    result: DeviceResultPayload,
+    metadata?: {
+      patientId?: string;
+      deviceId?: string;
+      toothOfInterest?: string;
+      observations?: string;
+      reportReading?: ReportReading;
+    }
+  ): Promise<Test>;
   update(id: string, input: Partial<Test>): Promise<Test>;
   remove(id: string): Promise<void>;
+  discard(id: string): Promise<void>;
 }
 
 export interface IReportService {
   list(params?: { patientId?: string }): Promise<Report[]>;
   get(id: string): Promise<Report | null>;
-  generate(testId: string, aiAnalysis?: string): Promise<Report>;
+  generate(testId: string, aiAnalysis?: string, reading?: ReportReading): Promise<Report>;
+  remove(id: string): Promise<boolean>;
 }
 
 export interface IDeviceService {
@@ -64,9 +79,19 @@ export interface IActivityService {
   push(event: Omit<ActivityEvent, "id" | "at">): Promise<ActivityEvent>;
 }
 
+export type StreamOptions = {
+  onResult?: (result: DeviceResultPayload) => void;
+  onCommandAck?: (ack: { status: string; message: string }) => void;
+  onDeviceOffline?: () => void;
+};
+
 /** Stream contract used by the dashboard. Mock emits simulated ticks; Live wraps MQTT/Socket.IO. */
 export interface ISensorStream {
-  subscribe(deviceId: string, onSample: (s: SensorSample) => void): () => void;
+  subscribe(
+    deviceId: string,
+    onSample: (s: SensorSample) => void,
+    options?: StreamOptions
+  ): () => void;
   systemStatus(): SystemStatus;
   onStatus(cb: (s: SystemStatus) => void): () => void;
 }

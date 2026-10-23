@@ -50,6 +50,7 @@ export type Device = {
   batteryPct?: number;
   battery?: number;
   signalStrength?: number; // 0-100
+  deviceState?: string;
   lastSeen: ISODate;
   pairedAt?: ISODate;
 };
@@ -62,6 +63,11 @@ export type SensorSample = {
   voltage?: number;
   temperature: number;
   heartRate: number;
+  pulse?: number;
+  t?: number;
+  red?: number;
+  ir?: number;
+  confidence?: "low" | "medium" | "high";
   heartRateConfidence?: number;
   spo2: number;
   spo2Confidence?: number;
@@ -85,7 +91,30 @@ export type SensorSample = {
   redDC?: number; // RED DC component for SpO2 calculation
   irAC?: number; // IR AC component for SpO2 calculation
   irDC?: number; // IR DC component for SpO2 calculation
+  // Firmware v3.7.0 telemetry fields
+  testSource?: "web" | "button" | string;
   testDuration?: number; // Test duration in milliseconds
+  finalHeartRate?: number;
+  finalSpo2?: number;
+  finalTemperature?: number;
+};
+
+export type DeviceResultPayload = {
+  deviceId: string;
+  completed: boolean;
+  valid: boolean;
+  spo2: number;
+  heartRate: number;
+  signalQuality: number;
+  vitalityIndex: number;
+  vitalityStatus: string;
+  temperature: number;
+  finalSpo2?: number;
+  finalHeartRate?: number;
+  finalTemperature?: number;
+  durationMs: number;
+  validReadings?: number;
+  timestamp: number; // Device uptime in ms
 };
 
 export type TestStatus = "in_progress" | "completed" | "aborted";
@@ -99,6 +128,23 @@ export type TestSummary = {
   signalQuality: number;
   confidence: "low" | "medium" | "high";
   durationSec: number;
+  vitalityIndex?: number;
+  vitalityStatus?: string;
+  valid?: boolean;
+  validReadings?: number;
+};
+
+export type ReportReading = {
+  valid: boolean;
+  spo2: number;
+  heartRate: number;
+  temperature: number;
+  signalQuality: number;
+  vitalityStatus: string;
+  vitalityIndex?: number;
+  testDuration: number; // in milliseconds (from telemetry.testDuration)
+  timestamp: string; // ISO date
+  errorMessage?: string;
 };
 
 export type Test = {
@@ -115,6 +161,8 @@ export type Test = {
   summary: TestSummary;
   observations: string;
   pulpVerdict: "vital" | "non_vital" | "inconclusive";
+  valid?: boolean;
+  reportReading?: ReportReading;
 };
 
 export type Report = {
@@ -124,6 +172,9 @@ export type Report = {
   clinicId: ID;
   generatedAt: ISODate;
   aiAnalysis?: string; // reserved
+  reading?: ReportReading;
+  valid?: boolean;
+  errorMessage?: string;
 };
 
 export type ActivityEvent = {
@@ -133,6 +184,7 @@ export type ActivityEvent = {
     | "test_started"
     | "test_stopped"
     | "report_generated"
+    | "report_deleted"
     | "patient_added"
     | "device_paired"
     | "device_online"
@@ -145,6 +197,10 @@ export type SystemStatus = {
   connected: boolean;
   devicesOnline: number;
   lastUpdate: string;
+  backend?: ConnectionStatus;
+  mqtt?: ConnectionStatus;
+  database?: ConnectionStatus;
+  device?: ConnectionStatus;
 };
 
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };

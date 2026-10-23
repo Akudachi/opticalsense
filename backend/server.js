@@ -40,6 +40,8 @@ const topicPrefix = process.env.MQTT_TOPIC_PREFIX || 'opticalsense';
 mqttClient.on('connect', () => {
   console.log('Connected to MQTT broker');
   mqttClient.subscribe(`${topicPrefix}/device/+/telemetry`);
+  mqttClient.subscribe(`${topicPrefix}/device/+/result`);
+  mqttClient.subscribe(`${topicPrefix}/device/+/commands`);
   mqttClient.subscribe(`${topicPrefix}/device/+/status`);
   mqttClient.subscribe(`${topicPrefix}/device/+/command/response`);
   mqttClient.subscribe(`${topicPrefix}/device/+/pair/request`);
@@ -109,6 +111,15 @@ mqttClient.on('message', (topic, message) => {
       io.to(`device-${data.deviceId}`).emit('telemetry', normalizedData);
 
       console.log('Bridged telemetry to Socket.IO for device:', data.deviceId);
+    }
+
+    // Handle test result messages
+    if (topic.includes('result') && deviceId) {
+      console.log('Bridging test result for device:', deviceId, data);
+      io.to(`device-${deviceId}`).emit('test_result', data);
+      if (data.testId) {
+        io.to(`test-${data.testId}`).emit('test_result', data);
+      }
     }
 
     // Handle heartbeat - also emit device status update via MQTT and Socket.IO

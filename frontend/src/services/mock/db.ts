@@ -56,6 +56,9 @@ class MockDb {
   saveTests() {
     storage.set(STORAGE_KEYS.TESTS, this.tests);
   }
+  saveReports() {
+    storage.set(STORAGE_KEYS.REPORTS, this.reports);
+  }
   saveDevices() {
     storage.set(STORAGE_KEYS.DEVICES, this.devices);
   }

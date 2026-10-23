@@ -14,39 +14,42 @@ class MQTTClient {
   private connectionCallbacks: Set<ConnectionCallback> = new Set();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private connectPromise: Promise<void> | null = null;
 
   // Pattern matching for MQTT wildcards
   private topicMatches(pattern: string, topic: string): boolean {
+    if (pattern === topic) return true;
     const patternParts = pattern.split('/');
     const topicParts = topic.split('/');
     
-    if (patternParts.length !== topicParts.length) return false;
-    
     for (let i = 0; i < patternParts.length; i++) {
       const patternPart = patternParts[i];
+      if (patternPart === '#') return true; // Multi-level wildcard
+      if (i >= topicParts.length) return false;
       const topicPart = topicParts[i];
-      
-      if (patternPart === '+') continue; // Single level wildcard
-      if (patternPart === '#') return true; // Multi level wildcard (not used here)
+      if (patternPart === '+') continue; // Single-level wildcard
       if (patternPart !== topicPart) return false;
     }
     
-    return true;
+    return patternParts.length === topicParts.length;
   }
 
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // If already connected, just resolve
-      if (this.client?.connected) {
-        console.log('MQTT already connected - skipping connect()');
-        resolve();
-        return;
-      }
+    // If already connected, just resolve
+    if (this.client?.connected) {
+      return Promise.resolve();
+    }
 
+    // Reuse in-flight connection promise to avoid tearing down concurrent connections
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    this.connectPromise = new Promise((resolve, reject) => {
       // If client exists but not connected, end it first
       if (this.client) {
         console.log('MQTT client exists but not connected - cleaning up...');
-        this.client.end();
+        this.client.end(true);
         this.client = null;
       }
 
@@ -64,6 +67,7 @@ class MQTTClient {
       this.client.on('connect', () => {
         console.log('MQTT Connected successfully');
         this.reconnectAttempts = 0;
+        this.connectPromise = null;
         this.notifyConnectionCallbacks(true);
         
         // Subscribe to all pending topics that were registered before connection
@@ -79,10 +83,9 @@ class MQTTClient {
         console.error('MQTT Error:', err);
         this.reconnectAttempts++;
         
-        // Don't notify connection failure on error - let close/offline handle it
-        // This prevents multiple disconnect notifications
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
           console.error('Max reconnect attempts reached');
+          this.connectPromise = null;
           this.notifyConnectionCallbacks(false);
           reject(err);
         }
@@ -90,7 +93,7 @@ class MQTTClient {
 
       this.client.on('close', () => {
         console.log('MQTT Connection closed');
-        console.trace('Stack trace of close event:');
+        this.connectPromise = null;
         this.notifyConnectionCallbacks(false);
       });
 
@@ -100,17 +103,14 @@ class MQTTClient {
 
       this.client.on('offline', () => {
         console.log('MQTT Client offline');
+        this.connectPromise = null;
       });
 
       this.client.on('message', (topic, message) => {
-        console.log('MQTT message received on topic:', topic);
-        console.log('Message content:', message.toString());
-        
         // Check all registered patterns to find matches
         let matchedCallbacks = false;
         for (const [pattern, callbacks] of this.messageCallbacks.entries()) {
           if (this.topicMatches(pattern, topic)) {
-            console.log(`Pattern ${pattern} matches topic ${topic}`);
             callbacks.forEach(cb => cb(topic, message));
             matchedCallbacks = true;
           }
@@ -121,26 +121,25 @@ class MQTTClient {
         }
       });
     });
+
+    return this.connectPromise;
   }
 
   disconnect(): void {
     if (this.client) {
       this.client.end();
       this.client = null;
+      this.connectPromise = null;
       this.notifyConnectionCallbacks(false);
     }
   }
 
   subscribe(topic: string, callback: MessageCallback): () => void {
-    console.log('Subscribing to topic:', topic);
     if (!this.messageCallbacks.has(topic)) {
       this.messageCallbacks.set(topic, new Set());
       
       if (this.client?.connected) {
-        console.log('Client connected, subscribing to:', topic);
         this.client.subscribe(topic);
-      } else {
-        console.log('Client not connected yet, will subscribe when connected');
       }
     }
 
@@ -161,15 +160,30 @@ class MQTTClient {
     };
   }
 
-  publish(topic: string, message: string, options?: { retain?: boolean; qos?: number }): void {
-    if (!this.client?.connected) {
-      console.error('Cannot publish - MQTT client not connected');
-      return;
+  async publish(
+    topic: string,
+    message: string,
+    options?: { retain?: boolean; qos?: 0 | 1 | 2 }
+  ): Promise<boolean> {
+    if (!this.isConnected()) {
+      try {
+        await this.connect();
+      } catch (err) {
+        console.error('Cannot publish - MQTT connection failed:', err);
+        return false;
+      }
     }
-    
-    console.log('Publishing to topic:', topic);
-    console.log('Message:', message);
-    this.client.publish(topic, message, options);
+
+    return new Promise((resolve) => {
+      this.client?.publish(topic, message, options || { qos: 1 }, (err) => {
+        if (err) {
+          console.error('Publish error on topic', topic, err);
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
   }
 
   onConnectionChange(callback: ConnectionCallback): () => void {

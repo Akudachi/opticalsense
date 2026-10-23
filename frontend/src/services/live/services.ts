@@ -14,8 +14,9 @@ import type {
   IReportService,
   ISensorStream,
   ITestService,
+  StreamOptions,
 } from "@/services/interfaces";
-import type { SensorSample, SystemStatus, Device, Patient, Test, Report, ActivityEvent, Clinic, Paged } from "@/types";
+import type { SensorSample, SystemStatus, Device, Patient, Test, Report, ReportReading, ActivityEvent, Clinic, Paged, DeviceResultPayload, TestSummary } from "@/types";
 import { mqttClient } from "@/lib/mqtt-client";
 import { env } from "@/config/env";
 
@@ -439,13 +440,11 @@ export const liveTests: ITestService = {
       const commandData = {
         command: 'start_test',
         testId: newTest.id,
-        timestamp: new Date().toISOString()
       };
-      mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+      await mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
       console.log('Sent start_test command to device:', data.deviceId);
     } catch (err) {
       console.error('Failed to send start command:', err);
-      // Even if MQTT fails, we still return the test (frontend state will handle it)
     }
 
     return newTest;
@@ -464,23 +463,31 @@ export const liveTests: ITestService = {
         const commandData = {
           command: 'stop_test',
           testId: id,
-          timestamp: new Date().toISOString()
         };
-        mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
+        await mqttClient.publish(commandTopic, JSON.stringify(commandData), { qos: 1 });
         console.log('Sent stop_test command to device:', test.deviceId);
       } catch (err) {
         console.error('Failed to send stop command:', err);
       }
       
+      // If result is provided directly, save it
+      if (data?.result) {
+        return liveTests.saveResult(id, data.result, {
+          patientId: test.patientId,
+          deviceId: test.deviceId,
+          toothOfInterest: test.toothOfInterest,
+          observations: data.observations,
+        });
+      }
+
       tests[index] = {
         ...tests[index],
         endedAt: new Date().toISOString(),
         status: 'completed',
-        samples: data.samples || [],
-        observations: data.observations || '',
-        // Calculate summary from samples
-        summary: calculateSummary(data.samples || []),
-        pulpVerdict: 'inconclusive', // Will be determined by AI
+        samples: data?.samples || [],
+        observations: data?.observations || '',
+        summary: calculateSummary(data?.samples || []),
+        pulpVerdict: 'inconclusive',
       };
       storeTests(tests);
       
@@ -489,6 +496,104 @@ export const liveTests: ITestService = {
       return tests[index];
     }
     throw new Error('Test not found');
+  },
+
+  saveResult: async (id: string, result: DeviceResultPayload, metadata) => {
+    const tests = getStoredTests();
+    const nowIso = new Date().toISOString();
+    const index = tests.findIndex(t => t.id === id);
+
+    const avgSpO2 = result.finalSpo2 ?? result.spo2 ?? 0;
+    const avgPulse = result.finalHeartRate ?? result.heartRate ?? 0;
+    const avgTemp = result.finalTemperature ?? result.temperature ?? 0;
+    const durationSec = result.durationMs ? Math.round(result.durationMs / 1000) : 0;
+
+    let verdict: Test['pulpVerdict'] = 'inconclusive';
+    const statusLower = (result.vitalityStatus || '').toLowerCase();
+    if (statusLower.includes('non')) {
+      verdict = 'non_vital';
+    } else if (statusLower.includes('vital')) {
+      verdict = 'vital';
+    }
+
+    const summary: TestSummary = {
+      avgSpO2,
+      avgPulse,
+      avgTemp,
+      minSpO2: avgSpO2,
+      maxPulse: avgPulse,
+      signalQuality: result.signalQuality ?? 0,
+      confidence: (result.signalQuality ?? 0) > 75 ? 'high' : (result.signalQuality ?? 0) > 40 ? 'medium' : 'low',
+      durationSec,
+      vitalityIndex: result.vitalityIndex,
+      vitalityStatus: result.vitalityStatus,
+      valid: result.valid,
+      validReadings: result.validReadings,
+    };
+
+    let test: Test;
+    const post20sSamples: SensorSample[] = metadata?.reportReading?.valid
+      ? [
+          {
+            deviceId: result.deviceId || metadata?.deviceId || 'device-1',
+            timestamp: metadata.reportReading.timestamp,
+            battery: 100,
+            temperature: metadata.reportReading.temperature,
+            heartRate: metadata.reportReading.heartRate,
+            spo2: metadata.reportReading.spo2,
+            signalQuality: metadata.reportReading.signalQuality,
+            vitalityStatus: metadata.reportReading.vitalityStatus,
+            vitalityIndex: metadata.reportReading.vitalityIndex,
+            testDuration: metadata.reportReading.testDuration,
+          },
+        ]
+      : [];
+
+    if (index >= 0) {
+      test = {
+        ...tests[index],
+        endedAt: nowIso,
+        status: 'completed',
+        summary,
+        pulpVerdict: verdict,
+        valid: result.valid,
+        reportReading: metadata?.reportReading,
+        samples: post20sSamples,
+      };
+      tests[index] = test;
+    } else {
+      const startedAt = result.durationMs 
+        ? new Date(Date.now() - result.durationMs).toISOString()
+        : nowIso;
+      test = {
+        id,
+        clinicId: 'demo-clinic',
+        patientId: metadata?.patientId || 'patient-1',
+        deviceId: result.deviceId || metadata?.deviceId || 'device-1',
+        doctorId: 'demo-user',
+        startedAt,
+        endedAt: nowIso,
+        status: 'completed',
+        toothOfInterest: metadata?.toothOfInterest,
+        samples: post20sSamples,
+        summary,
+        observations: metadata?.observations || '',
+        pulpVerdict: verdict,
+        valid: result.valid,
+        reportReading: metadata?.reportReading,
+      };
+      tests.push(test);
+    }
+
+    storeTests(tests);
+    addActivityEvent('test_stopped', `Test completed for patient ${test.patientId}`, id);
+    return test;
+  },
+
+  discard: async (id: string) => {
+    const tests = getStoredTests();
+    const filtered = tests.filter(t => t.id !== id);
+    storeTests(filtered);
   },
   
   update: async (id, data) => {
@@ -558,11 +663,48 @@ export const liveReports: IReportService = {
     return reports.find(r => r.id === id) || null;
   },
   
-  generate: async (testId, aiAnalysis) => {
+  generate: async (testId, aiAnalysis, reading) => {
     const tests = getStoredTests();
     const test = tests.find(t => t.id === testId);
     if (!test) throw new Error('Test not found');
     
+    // Pick the report reading taken after first 20s (never use /result average)
+    let reportReading: ReportReading;
+    if (reading) {
+      reportReading = reading;
+    } else if (test.reportReading) {
+      reportReading = test.reportReading;
+    } else {
+      const validSample = test.samples.find(
+        s => (s.testDuration ?? 0) >= 20000 && (s.heartRate ?? 0) > 0 && (s.spo2 ?? 0) > 0
+      );
+      if (validSample) {
+        reportReading = {
+          valid: true,
+          spo2: validSample.spo2,
+          heartRate: validSample.heartRate,
+          temperature: validSample.temperature,
+          signalQuality: validSample.signalQuality,
+          vitalityStatus: validSample.vitalityStatus || (test.pulpVerdict === 'non_vital' ? 'Non-Vital' : 'Vital'),
+          vitalityIndex: validSample.vitalityIndex,
+          testDuration: validSample.testDuration ?? 20000,
+          timestamp: validSample.timestamp,
+        };
+      } else {
+        reportReading = {
+          valid: false,
+          spo2: 0,
+          heartRate: 0,
+          temperature: 0,
+          signalQuality: 0,
+          vitalityStatus: 'Inconclusive',
+          testDuration: 0,
+          timestamp: new Date().toISOString(),
+          errorMessage: 'No valid reading after 20 s. Retry and keep the probe steady.',
+        };
+      }
+    }
+
     const reports = getStoredReports();
     const newReport: Report = {
       id: `report-${Date.now()}`,
@@ -571,6 +713,9 @@ export const liveReports: IReportService = {
       clinicId: test.clinicId,
       generatedAt: new Date().toISOString(),
       aiAnalysis: aiAnalysis || 'AI analysis pending',
+      reading: reportReading,
+      valid: reportReading.valid,
+      errorMessage: reportReading.errorMessage,
     };
     reports.push(newReport);
     storeReports(reports);
@@ -1051,17 +1196,20 @@ export const liveDevices: IDeviceService = {
 
 // Live MQTT streaming service
 export const liveStream: ISensorStream = {
-  subscribe: (deviceId: string, onSample: (s: SensorSample) => void): (() => void) => {
+  subscribe: (deviceId: string, onSample: (s: SensorSample) => void, options?: StreamOptions): (() => void) => {
     const telemetryTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/telemetry`;
+    const resultTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/result`;
+    const commandsTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/commands`;
     const statusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status`;
+    const statusPlusTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/status/+`;
     const heartbeatTopic = `${env.MQTT.topicPrefix}/device/${deviceId}/heartbeat`;
     
     console.log('=== MQTT SUBSCRIPTION START ===');
     console.log('Device ID:', deviceId);
     console.log('Telemetry topic:', telemetryTopic);
+    console.log('Result topic:', resultTopic);
+    console.log('Commands topic:', commandsTopic);
     console.log('Heartbeat topic:', heartbeatTopic);
-    console.log('MQTT Config:', env.MQTT);
-    console.log('USE_MOCK:', env.USE_MOCK);
     
     // Connect to MQTT if not already connected
     mqttClient.connect().catch(err => {
@@ -1069,17 +1217,12 @@ export const liveStream: ISensorStream = {
     });
 
     const unsubscribeTelemetry = mqttClient.subscribe(telemetryTopic, (topic, message) => {
-      console.log('=== MQTT MESSAGE RECEIVED ===');
-      console.log('Topic:', topic);
-      console.log('Expected topic:', telemetryTopic);
-      console.log('Message content:', message.toString());
       try {
         const data = JSON.parse(message.toString());
-        console.log('Parsed telemetry data:', data);
         
         const sample: SensorSample = {
           id: `${deviceId}-${Date.now()}`,
-          deviceId: data.deviceId,
+          deviceId: data.deviceId || deviceId,
           timestamp: new Date().toISOString(), // Use receive time; ESP sends millis() not epoch
           heartRate: data.heartRate ?? 0,
           spo2: data.spo2 ?? 0,
@@ -1097,7 +1240,6 @@ export const liveStream: ISensorStream = {
           deviceState: data.deviceState,
           sampleCount: data.sampleCount,
           demoMode: data.demoMode || false,
-          // GY-MAX3010x specific fields
           redRaw: data.redRaw,
           irRaw: data.irRaw,
           fingerDetected: data.fingerDetected,
@@ -1109,9 +1251,13 @@ export const liveStream: ISensorStream = {
           irAC: data.irAC,
           irDC: data.irDC,
           testDuration: data.testDuration,
+          // Firmware v3.7.0 additions
+          testSource: data.testSource,
+          finalHeartRate: data.finalHeartRate,
+          finalSpo2: data.finalSpo2,
+          finalTemperature: data.finalTemperature,
         };
         
-        console.log('Calling onSample with sample:', sample);
         onSample(sample);
         
         // Update device lastSeen and state from telemetry
@@ -1127,10 +1273,50 @@ export const liveStream: ISensorStream = {
           };
           storeDevices(devices);
         }
-        
-        console.log('=== MQTT MESSAGE PROCESSED ===');
       } catch (err) {
         console.error('Error parsing telemetry message:', err);
+      }
+    });
+
+    const unsubscribeResult = mqttClient.subscribe(resultTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        console.log('MQTT Result received:', data);
+        if (options?.onResult) {
+          options.onResult({
+            deviceId: data.deviceId || deviceId,
+            completed: Boolean(data.completed),
+            valid: Boolean(data.valid),
+            spo2: Number(data.finalSpo2 ?? data.spo2 ?? 0),
+            heartRate: Number(data.finalHeartRate ?? data.heartRate ?? 0),
+            temperature: Number(data.finalTemperature ?? data.temperature ?? 0),
+            signalQuality: Number(data.signalQuality ?? 0),
+            vitalityIndex: Number(data.vitalityIndex ?? 0),
+            vitalityStatus: String(data.vitalityStatus ?? 'Inconclusive'),
+            finalSpo2: data.finalSpo2 !== undefined ? Number(data.finalSpo2) : (data.spo2 !== undefined ? Number(data.spo2) : undefined),
+            finalHeartRate: data.finalHeartRate !== undefined ? Number(data.finalHeartRate) : (data.heartRate !== undefined ? Number(data.heartRate) : undefined),
+            finalTemperature: data.finalTemperature !== undefined ? Number(data.finalTemperature) : (data.temperature !== undefined ? Number(data.temperature) : undefined),
+            durationMs: Number(data.durationMs ?? 0),
+            validReadings: Number(data.validReadings ?? 0),
+            timestamp: Number(data.timestamp ?? 0),
+          });
+        }
+      } catch (err) {
+        console.error('Error parsing result message:', err);
+      }
+    });
+
+    const unsubscribeCommands = mqttClient.subscribe(commandsTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        // Firmware replies on commands topic with { status: "success", message: "..." }
+        // Ignore for data, provide as confirmation
+        if (data.status && data.message && !data.command) {
+          console.log('Command ack received:', data);
+          options?.onCommandAck?.({ status: data.status, message: data.message });
+        }
+      } catch (err) {
+        console.error('Error parsing command ack:', err);
       }
     });
 
@@ -1139,20 +1325,28 @@ export const liveStream: ISensorStream = {
         const data = JSON.parse(message.toString());
         console.log('Device status update:', data);
         
+        const isOffline = data.status === 'offline' || data.online === false;
+        if (isOffline) {
+          options?.onDeviceOffline?.();
+        }
+
         // Update stored device with fresh data
         const devices = getStoredDevices();
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
         if (idx >= 0) {
+          const isOnline = !isOffline;
           devices[idx] = {
             ...devices[idx],
+            online: isOnline,
+            status: isOnline ? 'online' : 'offline',
             lastSeen: new Date().toISOString(),
-            deviceState: data.state || data.deviceState || 'UNKNOWN',
+            deviceState: data.state || data.deviceState || devices[idx].deviceState || 'UNKNOWN',
             battery: data.battery ?? devices[idx].battery,
             batteryPct: data.battery ?? devices[idx].batteryPct,
             wifi: {
               ssid: devices[idx].wifi?.ssid || 'Connected',
               rssi: data.wifi ?? devices[idx].wifi?.rssi ?? -50,
-              connected: true,
+              connected: isOnline,
             },
             mqtt: data.mqtt?.toLowerCase().includes('connected') ? 'connected' : devices[idx].mqtt,
           };
@@ -1163,11 +1357,20 @@ export const liveStream: ISensorStream = {
       }
     });
 
+    const unsubscribeStatusPlus = mqttClient.subscribe(statusPlusTopic, (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (topic.includes('/status/offline') || data.status === 'offline' || data.online === false) {
+          options?.onDeviceOffline?.();
+        }
+      } catch (err) {
+        console.error('Error parsing status/+ message:', err);
+      }
+    });
+
     const unsubscribeHeartbeat = mqttClient.subscribe(heartbeatTopic, (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
-        console.log('Device heartbeat received:', data);
-
         // Heartbeat always indicates device is online
         const devices = getStoredDevices();
         const idx = devices.findIndex(d => d.id === deviceId || d.deviceId === deviceId);
@@ -1197,7 +1400,10 @@ export const liveStream: ISensorStream = {
     // Return combined unsubscribe function
     return () => {
       unsubscribeTelemetry();
+      unsubscribeResult();
+      unsubscribeCommands();
       unsubscribeStatus();
+      unsubscribeStatusPlus();
       unsubscribeHeartbeat();
     };
   },
